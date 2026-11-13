@@ -2042,7 +2042,6 @@ Library.Notify = function(Self, Body, Time)
 end
 
 if not LocalPlayer.Character or not CurrentRooms:FindFirstChildOfClass("Model") then
-	Functions.Notify({ Title = "Waiting for the game to load..." })
 	while not LocalPlayer.Character or not CurrentRooms:FindFirstChildOfClass("Model") do
 		task.wait()
 	end
@@ -2616,7 +2615,6 @@ for _, FloorTab in ipairs({
 	{ "Mines", "pickaxe" },
 	{ "Archives", "rbxassetid://104508835882225" },
 	{ "Stairwell", "rbxassetid://80017304328364" },
-	{ "Ripple", "waves" },
 }) do
 	if not Globals.FloorTabName and FloorIs(FloorTab[1]) then
 		Globals.FloorTabName = FloorTab[1]
@@ -2632,10 +2630,10 @@ Groupboxes.General_Character:AddSlider("SpeedBoostSlider", {
 	Text = "Speed Boost", Min = 0, Max = 100, Default = 0, Rounding = 0, Compact = true
 })
 Groupboxes.General_Character:AddToggle("SpeedBoostToggle", {
-	Text = "Enable Speed Boost", Default = false, Tooltip = "Increases your walkspeed by the specified amount."
+	Text = "Enable Speed Boost", Default = false, Tooltip = "Adds the slider value on top of your normal walk speed."
 })
 Groupboxes.General_Character:AddToggle("FlyToggle", {
-	Text = "Fly", Default = false, Tooltip = "Allows you to freely fly around the map."
+	Text = "Fly", Default = false, Tooltip = "Lets your character float and move freely in any direction."
 })
 Toggles.FlyToggle:AddKeyPicker("FlyKeybind", {
 	Text = "Fly", Default = "F", Mode = "Toggle", SyncToggleState = true
@@ -2645,10 +2643,10 @@ Groupboxes.General_Character:AddSlider("FlySpeed", {
 })
 Groupboxes.General_Character:AddDivider()
 Groupboxes.General_Character:AddToggle("NoclipToggle", {
-	Text = "Noclip", Default = false, Tooltip = "Allows your character to pass through solid objects."
+	Text = "Noclip", Default = false, Tooltip = "Turns off collisions so you can walk through walls and props."
 })
 Groupboxes.General_Character:AddToggle("RemoveAcceleration", {
-	Text = "Remove Acceleration", Default = false, Tooltip = "Prevents your character from sliding while moving."
+	Text = "Remove Acceleration", Default = false, Tooltip = "Stops the slippery movement so you halt the moment you let go."
 })
 
 local CustomPhysics
@@ -2670,10 +2668,10 @@ end)
 
 Groupboxes.General_Character:AddDivider()
 Groupboxes.General_Character:AddToggle("EnableCharacterJump", {
-	Text = "Enable Jumping", Default = false, Tooltip = "Allows your character to jump."
+	Text = "Enable Jumping", Default = false, Tooltip = "Unlocks the jump button, which the game normally disables."
 })
 Groupboxes.General_Character:AddToggle("EnableCharacterSlide", {
-	Text = "Enable Sliding", Default = false, Tooltip = "Allows your character to slide."
+	Text = "Enable Sliding", Default = false, Tooltip = "Unlocks the slide move, which the game normally disables."
 })
 
 local OldJump = false
@@ -2697,14 +2695,14 @@ end)
 
 Groupboxes.General_Self = Tabs.Main:AddLeftGroupbox("Self")
 Groupboxes.General_Self:AddToggle("DoorReachToggle", {
-	Text = "Door Reach", Default = false, Tooltip = "Allows you to open doors from further away."
+	Text = "Door Reach", Default = false, Tooltip = "Extends how far away you can be and still open a door."
 })
 Groupboxes.General_Self:AddDivider()
 Groupboxes.General_Self:AddSlider("PromptReachSlider", {
 	Text = "Prompt Reach Multiplier", Min = 1, Max = 2, Default = 1, Rounding = 1, Compact = true
 })
 Groupboxes.General_Self:AddToggle("AutoInteractToggle", {
-	Text = "Auto Interact", Default = false, Tooltip = "Automatically triggers nearby prompts."
+	Text = "Auto Interact", Default = false, Tooltip = "Presses every interact prompt in range for you. Use the ignore list to skip some."
 })
 Toggles.AutoInteractToggle:AddKeyPicker("AutoInteractKeybind", {
     Text = "Auto Interact",
@@ -2719,10 +2717,10 @@ Groupboxes.General_Self:AddDropdown("AutoInteractIgnoreList", {
 	Multi = true, AllowNull = true
 })
 Groupboxes.General_Self:AddToggle("InstantPrompts", {
-	Text = "Instant Prompts", Default = false, Tooltip = "Allows you to trigger all prompts instantly."
+	Text = "Instant Prompts", Default = false, Tooltip = "Removes the hold time, so prompts fire the moment you press them."
 })
 Groupboxes.General_Self:AddToggle("PromptClip", {
-	Text = "Prompt Clip", Default = false, Tooltip = "Allows you to interact with prompts through walls."
+	Text = "Prompt Clip", Default = false, Tooltip = "Lets prompts work even when a wall is in the way."
 })
 
 Options.PromptReachSlider:OnChanged(function(Value)
@@ -2743,11 +2741,11 @@ end)
 
 Groupboxes.Self_Automation = Tabs.Main:AddRightGroupbox("Automation")
 Groupboxes.Self_Automation:AddToggle("AutoBreakerBox", {
-	Text = "Auto Breaker Box", Default = false, Tooltip = "Automatically solves the breaker box."
+	Text = "Auto Breaker Box", Default = false, Tooltip = "Fills in the breaker box puzzle for you once you open it."
 })
 Groupboxes.Self_Automation:AddToggle("AutoSolveAnchors", {
 	Text = "Auto Solve Anchors", Default = false,
-	Tooltip = "Automatically enters the correct code into anchors when you are near them."
+	Tooltip = "Types the right anchor code as soon as you walk up to an anchor."
 })
 Toggles.AutoBreakerBox:OnChanged(function(Value)
 	if Value and CurrentRooms:FindFirstChild("ElevatorBreaker", true) then
@@ -2762,22 +2760,22 @@ Toggles.AutoBreakerBox:OnChanged(function(Value)
 	end
 end)
 
-Groupboxes.Self_Automation:AddToggle("AutoHeartbeatMinigame", { Text = "Auto Heartbeat Minigame", Default = false, Tooltip = "Prevents the 'Figure' minigame from ever failing.", Disabled = not Functions.CheckCompatability({"hookmetamethod", "newcclosure", "getnamecallmethod"}), DisabledTooltip = Globals.IncompatibleMessage })
+Groupboxes.Self_Automation:AddToggle("AutoHeartbeatMinigame", { Text = "Auto Heartbeat Minigame", Default = false, Tooltip = "Blocks the heartbeat minigame from reporting a miss, so Figure never catches you.", Disabled = not Functions.CheckCompatability({"hookmetamethod", "newcclosure", "getnamecallmethod"}), DisabledTooltip = Globals.IncompatibleMessage })
 Groupboxes.Self_Automation:AddDivider()
 Groupboxes.Self_Automation:AddToggle("AutoUnlockPadlockToggle", {
-	Text = "Auto Unlock Padlock", Default = false, Tooltip = "Automatically enters the code into the library padlock."
+	Text = "Auto Unlock Padlock", Default = false, Tooltip = "Enters the library code into the padlock when you are within the set distance."
 })
 Groupboxes.Self_Automation:AddSlider("AutoUnlockPadlockSlider", {
 	Text = "Unlock Distance", Min = 1, Max = 50, Default = 10, Rounding = 0, Compact = true
 })
 Groupboxes.Self_Automation:AddToggle("AutoLibraryGuessCode", {
 	Text = "Guess Library Code", Default = false,
-	Tooltip = "Attempts to guess the library code, but collecting some books is also necessary."
+	Tooltip = "Fills the unknown digits with guesses. Collect a few hint books first for better odds."
 })
 Groupboxes.Self_Automation:AddDivider()
 Groupboxes.Self_Automation:AddToggle("AutoClosetToggle", {
 	Text = "Auto Closet", Default = false,
-	Tooltip = "Automatically hides in a nearby closet when an entity is near."
+	Tooltip = "Jumps into the closest hiding spot when a dangerous entity gets close, and leaves once it is gone."
 })
 Toggles.AutoClosetToggle:AddKeyPicker("AutoClosetKeybind", {
 	Text = "Auto Closet", Default = "Q", Mode = "Toggle", SyncToggleState = true
@@ -2785,22 +2783,22 @@ Toggles.AutoClosetToggle:AddKeyPicker("AutoClosetKeybind", {
 
 Groupboxes.Self_Misc = Tabs.Main:AddRightGroupbox("Miscellaneous")
 Groupboxes.Self_Misc:AddButton({
-	Text = "Play Again", Tooltip = "Makes you join a new run, click again to cancel.", DoubleClick = true,
+	Text = "Play Again", Tooltip = "Queues a fresh run. Click it again to cancel the queue.", DoubleClick = true,
 	Func = function() RemotesFolder.PlayAgain:FireServer() end
 })
 Groupboxes.Self_Misc:AddButton({
-	Text = "Return to Lobby", Tooltip = "Makes you teleport back to the lobby.", DoubleClick = true,
+	Text = "Return to Lobby", Tooltip = "Sends you straight back to the lobby.", DoubleClick = true,
 	Func = function() RemotesFolder.Lobby:FireServer() end
 })
 Groupboxes.Self_Misc:AddButton({
 	Text = "Revive",
-	Tooltip = "Makes you revive, if you have a revive and haven't already revived in this run.",
+	Tooltip = "Uses one of your revives, if you still have one and haven't revived this run.",
 	DoubleClick = true,
 	Func = function() RemotesFolder.Revive:FireServer() end
 })
 Groupboxes.Self_Misc:AddButton({
 	Text = "Reset Character",
-	Tooltip = "Kills your character on the server. (takes around 20 seconds if replicatesignal isn't supported)",
+	Tooltip = "Kills your character on the server. Can take about 20 seconds when replicatesignal is missing.",
 	DoubleClick = true,
 	Func = function()
 		Globals.SelfKilled = true
@@ -2817,11 +2815,6 @@ Groupboxes.Self_Misc:AddButton({
 })
 
 
-Tabs.Main:UpdateWarningBox({
-	Visible = true,
-	Title = "Risk Warning",
-	Text = "Features highlighted in red are risky.",
-})
 
 
 
@@ -2829,14 +2822,14 @@ Tabs.Main:UpdateWarningBox({
 Groupboxes.Debug = Tabs.Main:AddRightGroupbox("Debug")
 Groupboxes.Debug:AddButton({
 	Text = "Ladder Softlock Fix",
-	Tooltip = "Ladder Softlock Fix.",
+	Tooltip = "Clears the stuck 'climbing' state if a ladder locked your movement.",
 	Func = function()
    		LocalPlayer:SetAttribute("Climbing", false)
 	end
 })
 Groupboxes.Debug:AddButton({
 	Text = "Void",
-	Tooltip = "Teleports your character to Y -120.",
+	Tooltip = "Drops your character far below the map (Y -120).",
 	Func = function()
 		if not Character then return end
 		local Pivot = Character:GetPivot()
@@ -2867,7 +2860,7 @@ Groupboxes.Debug:AddButton({
 })
 Groupboxes.Debug:AddButton({
 	Text = "Exit Closet",
-	Tooltip = "Exits the current closet.",
+	Tooltip = "Forces you out of whatever hiding spot you are in.",
 	Func = function()
 		if RemotesFolder and RemotesFolder:FindFirstChild("CamLock") then
 			RemotesFolder.CamLock:FireServer()
@@ -2910,7 +2903,7 @@ end
 
 Toggles.TpNextDoor = Groupboxes.Debug:AddToggle("TpNextDoor", {
 	Text = "Auto Tp Next Door",
-	Tooltip = "Continuously teleports you to the next sequential unopened door.",
+	Tooltip = "Keeps teleporting you to the next closed door in order.",
 	Default = false
 })
 
@@ -2939,17 +2932,17 @@ end)
 
 Groupboxes.Exploits_Bypass = Tabs.Exploits:AddLeftGroupbox("Bypass / Solve")
 
-Groupboxes.Exploits_Bypass:AddToggle("BypassGiggle",         { Text = "Bypass Giggle",           Default = false, Tooltip = "Prevents 'Giggle' from attacking you." })
-Groupboxes.Exploits_Bypass:AddToggle("BypassDupe",           { Text = "Bypass Dupe",             Default = false, Tooltip = "Prevents you from open 'Dupe' fake doors." })
-Groupboxes.Exploits_Bypass:AddToggle("BypassEyes",           { Text = "Bypass Eyes",             Default = false, Tooltip = "Prevents 'Eyes' from hurting you." })
-Groupboxes.Exploits_Bypass:AddToggle("BypassLookman",        { Text = "Bypass Lookman",          Default = false, Tooltip = "Prevents 'Lookman' from hurting you." })
-Groupboxes.Exploits_Bypass:AddToggle("BypassGloombatEggs",   { Text = "Bypass Gloombat Eggs",    Default = false, Tooltip = "Prevents taking damage from stepping on 'Gloombat' eggs." })
-Groupboxes.Exploits_Bypass:AddToggle("BypassSeekObstructions", { Text = "Bypass Seek Obstructions", Default = false, Tooltip = "Prevents obstacles in the 'Seek' chase from harming you." })
-Groupboxes.Exploits_Bypass:AddToggle("BypassVacuum",         { Text = "Bypass Vacuum",           Default = false, Tooltip = "Prevents you from falling into 'Vacuum' fake doors." })
-Groupboxes.Exploits_Bypass:AddToggle("BypassKillbricks",     { Text = "Bypass Killbricks",       Default = false, Tooltip = "Prevents 'Lava' from hurting you." })
-Groupboxes.Exploits_Bypass:AddToggle("BypassSnare",          { Text = "Bypass Snare",            Default = false, Tooltip = "Prevents 'Snare' from trapping you." })
-Groupboxes.Exploits_Bypass:AddToggle("BypassBanana",         { Text = "Bypass Banana",           Default = false, Tooltip = "Prevents 'Banana Peel' from slipping you up (sometimes doesn't work)." })
-Groupboxes.Exploits_Bypass:AddToggle("BypassJeff",           { Text = "Bypass Jeff",             Default = false, Tooltip = "Prevents 'Jeff the Killer' from stabbing you (sometimes doesn't work)." })
+Groupboxes.Exploits_Bypass:AddToggle("BypassGiggle",         { Text = "Bypass Giggle",           Default = false, Tooltip = "Giggle can no longer hurt you." })
+Groupboxes.Exploits_Bypass:AddToggle("BypassDupe",           { Text = "Bypass Dupe",             Default = false, Tooltip = "Stops you from opening Dupe's fake doors by accident." })
+Groupboxes.Exploits_Bypass:AddToggle("BypassEyes",           { Text = "Bypass Eyes",             Default = false, Tooltip = "Looking at Eyes no longer damages you." })
+Groupboxes.Exploits_Bypass:AddToggle("BypassLookman",        { Text = "Bypass Lookman",          Default = false, Tooltip = "Looking at Lookman no longer damages you." })
+Groupboxes.Exploits_Bypass:AddToggle("BypassGloombatEggs",   { Text = "Bypass Gloombat Eggs",    Default = false, Tooltip = "Stepping on Gloombat eggs does no damage." })
+Groupboxes.Exploits_Bypass:AddToggle("BypassSeekObstructions", { Text = "Bypass Seek Obstructions", Default = false, Tooltip = "Obstacles during the Seek chase can't hurt you." })
+Groupboxes.Exploits_Bypass:AddToggle("BypassVacuum",         { Text = "Bypass Vacuum",           Default = false, Tooltip = "Vacuum's fake doors can no longer pull you in." })
+Groupboxes.Exploits_Bypass:AddToggle("BypassKillbricks",     { Text = "Bypass Killbricks",       Default = false, Tooltip = "Lava and other kill bricks stop damaging you." })
+Groupboxes.Exploits_Bypass:AddToggle("BypassSnare",          { Text = "Bypass Snare",            Default = false, Tooltip = "Snares no longer hold you in place." })
+Groupboxes.Exploits_Bypass:AddToggle("BypassBanana",         { Text = "Bypass Banana",           Default = false, Tooltip = "Banana peels won't trip you. Not 100% reliable." })
+Groupboxes.Exploits_Bypass:AddToggle("BypassJeff",           { Text = "Bypass Jeff",             Default = false, Tooltip = "Jeff's stab won't land. Not 100% reliable." })
 
 
 Toggles.BypassGiggle:OnChanged(function(Value)
@@ -3057,29 +3050,13 @@ end)
 
 -- Archives
 
-Groupboxes.Archives_Misc = Tabs.Archives:AddRightGroupbox("Exploits / Anti")
-Groupboxes.Archives_Misc:AddToggle("AntiRansom", { Text = "Anti Ransom", Default = false, Tooltip = "Prevents 'Ransom' from attacking you." })
-Groupboxes.Archives_Misc:AddToggle("AntiClosetTrash", { Text = "Anti Closet Trash", Default = false, Tooltip = "Prevents 'Closet Trash' from spawning." })
-Groupboxes.Archives_Misc:AddToggle("ForgetMeNotSolver", { Text = "Forget Me Not Skipper", Default = false, Tooltip = "Automatically Skippes Forget Me Not doors." })
-Groupboxes.Archives_Misc:AddToggle("TimeShower", { Text = "Time Shower", Default = false, Tooltip = "Shows the Archives clock time." })
-Groupboxes.Archives_Misc:AddToggle("BypassDronesStampede", { Text = "Stop Time/Anti Stampede", Default = false, Tooltip = "Prevents 'The Drones Stampede' from attacking you." })
-Groupboxes.Archives_Misc:AddToggle("HonchoCorrectBoxESP", { Text = "Correct Box ESP/Auto Interact", Default = false, Tooltip = "ESP correct Archives boxes in the Honcho sequence and automatically interact with the correct deposit." })
+Groupboxes.Archives_Misc = Tabs.Archives:AddRightGroupbox("Misc")
+Groupboxes.Archives_Misc:AddToggle("AntiRansom", { Text = "Anti Ransom", Default = false, Tooltip = "Ransom can no longer attack you." })
+Groupboxes.Archives_Misc:AddToggle("AntiClosetTrash", { Text = "Auto Clear Closets", Default = false, Tooltip = "Clears the trash that spawns inside closets so you can hide normally." })
+Groupboxes.Archives_Misc:AddToggle("ForgetMeNotSolver", { Text = "Auto Skip Forget Me Not", Default = false, Tooltip = "Skips through the Forget Me Not doors for you." })
+Groupboxes.Archives_Misc:AddToggle("BypassDronesStampede", { Text = "Anti Stampede", Default = false, Tooltip = "Freezes the Archives clock so the Drones Stampede never triggers." })
+Groupboxes.Archives_Misc:AddToggle("HonchoCorrectBoxESP", { Text = "Correct Box ESP/Auto Interact", Default = false, Tooltip = "Highlights the right box in the Honcho sequence and drops it in the correct deposit for you." })
 
-TimeShowerLabel = Instance.new("TextLabel")
-TimeShowerLabel.Name = "TimeShower"
-TimeShowerLabel.AnchorPoint = Vector2.new(0, 1)
-TimeShowerLabel.Position = UDim2.new(0, 12, 1, -12)
-TimeShowerLabel.Size = UDim2.new(0, 180, 0, 32)
-TimeShowerLabel.BackgroundTransparency = 1
-TimeShowerLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-TimeShowerLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-TimeShowerLabel.TextStrokeTransparency = 0.35
-TimeShowerLabel.Font = Enum.Font.GothamBold
-TimeShowerLabel.TextSize = 18
-TimeShowerLabel.TextXAlignment = Enum.TextXAlignment.Left
-TimeShowerLabel.Text = "Time: --:--"
-TimeShowerLabel.Visible = false
-TimeShowerLabel.Parent = Container
 
 
 
@@ -3144,29 +3121,6 @@ task.spawn(function()
 	end
 end)
 
-local function StopTimeShower()
-	TimeShowerToken += 1
-	if TimeShowerConnection then
-		TimeShowerConnection:Disconnect()
-		TimeShowerConnection = nil
-	end
-	if TimeShowerLabel then
-		TimeShowerLabel.Visible = false
-		TimeShowerLabel.Text = "Time: --:--"
-	end
-end
-
-Toggles.TimeShower:OnChanged(function(Value)
-	StopTimeShower()
-	if not Value then return end
-	local Token = TimeShowerToken
-	TimeShowerLabel.Visible = true
-	TimeShowerConnection = Services.RunService.Heartbeat:Connect(function()
-		if Token ~= TimeShowerToken then return end
-		local TextLabel = ResolveClockLabel()
-		TimeShowerLabel.Text = TextLabel and ("Time: " .. TextLabel.Text) or "Time: --:--"
-	end)
-end)
 
 Toggles.BypassDronesStampede:OnChanged(function(enabled)
 	if BypassDronesStampedeConnection then
@@ -3333,12 +3287,11 @@ end)
 
 
 Groupboxes.Archives_Bypasses = Tabs.Archives:AddLeftGroupbox("Bypasses")
-Groupboxes.Archives_Bypasses:AddToggle("BypassWater", { Text = "Bypass Electric Water", Default = false, Tooltip = "Prevents electric water from hurting you." })
-Groupboxes.Archives_Bypasses:AddToggle("BypassAlma", { Text = "Bypass Alma", Default = false, Tooltip = "Prevents 'Alma' from spawning." })
-Groupboxes.Archives_Bypasses:AddToggle("BypassDrones", { Text = "Bypass Drones", Default = false, Tooltip = "Prevents 'Drones' from attacking you." })
-Groupboxes.Archives_Bypasses:AddToggle("AntiScribbles", { Text = "Bypass Scribbles", Default = false, Tooltip = "Prevents 'Scribbles' from attacking you." })
+Groupboxes.Archives_Bypasses:AddToggle("BypassWater", { Text = "Bypass Electric Water", Default = false, Tooltip = "You can walk through the electric water safely." })
+Groupboxes.Archives_Bypasses:AddToggle("BypassAlma", { Text = "Bypass Alma", Default = false, Tooltip = "Stops Alma from appearing." })
+Groupboxes.Archives_Bypasses:AddToggle("BypassDrones", { Text = "Bypass Drones", Default = false, Tooltip = "Drones can no longer attack you." })
+Groupboxes.Archives_Bypasses:AddToggle("AntiScribbles", { Text = "Bypass Scribbles", Default = false, Tooltip = "Scribbles can no longer attack you." })
 
-Groupboxes.Archives_Experimental = Tabs.Archives:AddLeftGroupbox("Experimental")
 
 Toggles.AntiClosetTrash:OnChanged(function(Value)
 	if AntiClosetTrash_Connection then
@@ -3657,30 +3610,18 @@ Toggles.BypassDrones:OnChanged(function(Value)
 	end
 end)
 
-Groupboxes.Stairwell_Misc = Tabs.Stairwell:AddLeftGroupbox("Exploits / Anti / Misc")
+Groupboxes.Stairwell_Misc = Tabs.Stairwell:AddLeftGroupbox("Misc")
 
 
 
-Groupboxes.Stairwell_Misc:AddDivider()
-Groupboxes.Stairwell_Misc:AddToggle("BypassNoise", { Text = "Noise Tv Breaker", Default = false, Tooltip = "Breaks the tv of noise while holding it." })
-Groupboxes.Stairwell_Misc:AddToggle("AntiNoise", { Text = "Anti Noise", Default = false, Tooltip = "Prevents the game from making noise when moving (Visual studio auto ai lmfao âœŒ)." })
+Groupboxes.Stairwell_Misc:AddToggle("BypassNoise", { Text = "Noise Tv Breaker", Default = false, Tooltip = "Breaks Noise's TV while you are carrying it." })
 
 
-Groupboxes.Stairwell_Misc:AddToggle("DroppedItemValue", { Text = "Item Number", Default = false, Tooltip = "Shows the number of dropped items." })
 
-Groupboxes.Stairwell_Misc:AddToggle("KillAllWithCart", {
-	Text = "Kill All (Requires â‰¥1 Cart)",
-	Default = false,
-})
-Groupboxes.Stairwell_Misc:AddToggle("FlingCreak", {
-	Text = "Bug Out Creak (Requires â‰¥5 Cart)",
-	Default = false,
-	ToolTip = "DONT TOUCH THE CARTS URSELF, U WILL DIE"
-})
 Groupboxes.Stairwell_Misc:AddToggle("CreakAggressionMeter", {
     Text = "Creak Aggression Meter",
     Default = false,
-    Tooltip = "Shows Creak's aggression above its head."
+    Tooltip = "Draws Creak's current aggression level above its head."
 })
 
 local CreakAggressionMetersTable = {}
@@ -3863,64 +3804,7 @@ Toggles.CreakAggressionMeter:OnChanged(function(CreakToggleEnabled)
     end
 end)
 
-Toggles.KillAllWithCart:OnChanged(function(KillAllWithCartState)
-	if not KillAllWithCartState then return end
 
-	local KillAllWithCartIndex = 1
-
-	task.spawn(function()
-		while Toggles.KillAllWithCart.Value do
-			local KillAllWithCartCarts = {}
-			for _, KillAllWithCartModel in ipairs(workspace.Misc:GetChildren()) do
-				if KillAllWithCartModel.Name == "ShoppingCart" and KillAllWithCartModel:IsA("Model") then
-					KillAllWithCartCarts[#KillAllWithCartCarts + 1] = KillAllWithCartModel
-				end
-			end
-
-			local KillAllWithCartAlivePlayers = {}
-			for _, KillAllWithCartPlayer in ipairs(game.Players:GetPlayers()) do
-				if KillAllWithCartPlayer ~= game.Players.LocalPlayer and KillAllWithCartPlayer.Character then
-					local KillAllWithCartHumanoid = KillAllWithCartPlayer.Character:FindFirstChildOfClass("Humanoid")
-					if KillAllWithCartHumanoid and KillAllWithCartHumanoid.Health > 0 then
-						KillAllWithCartAlivePlayers[#KillAllWithCartAlivePlayers + 1] = KillAllWithCartPlayer
-					end
-				end
-			end
-
-			if #KillAllWithCartCarts > 0 and #KillAllWithCartAlivePlayers > 0 then
-				if KillAllWithCartIndex > #KillAllWithCartAlivePlayers then
-					KillAllWithCartIndex = 1
-				end
-				local KillAllWithCartTarget = KillAllWithCartAlivePlayers[KillAllWithCartIndex]
-				local KillAllWithCartTargetCFrame = KillAllWithCartTarget.Character:GetPivot()
-				for KillAllWithCartCartIndex = 1, #KillAllWithCartCarts do
-					KillAllWithCartCarts[KillAllWithCartCartIndex]:PivotTo(KillAllWithCartTargetCFrame)
-				end
-				KillAllWithCartIndex = KillAllWithCartIndex + 1
-			end
-			task.wait(0)
-		end
-	end)
-end)
-
-Toggles.FlingCreak:OnChanged(function(FlingCreakState)
-	if not FlingCreakState then return end
-
-	task.spawn(function()
-		while Toggles.FlingCreak.Value do
-			local creak = workspace:FindFirstChild("LiveEntities") and workspace.LiveEntities:FindFirstChild("Creak")
-			if creak then
-				local targetCFrame = creak:GetPivot()
-				for _, model in ipairs(workspace.Misc:GetChildren()) do
-					if model.Name == "ShoppingCart" and model:IsA("Model") then
-						model:PivotTo(targetCFrame)
-					end
-				end
-			end
-			task.wait(0.10)
-		end
-	end)
-end)
 
 
 
@@ -3931,21 +3815,9 @@ Groupboxes.Stairwell_Misc:AddDivider()
 Groupboxes.Stairwell_Misc:AddToggle("DisableStairwellCrusherCollision", {
 	Text = "Disable Crushers",
 	Default = false,
-})
-Groupboxes.Stairwell_Misc:AddToggle("DeleteStairwellCrusherExceptBasicWall", {
-	Text = "Remove Crushers",
-	Default = false,
-})
-Groupboxes.Stairwell_Misc:AddToggle("MeldRemover", {
-	Text = "Remove Meld",
-	Default = false,
+	Tooltip = "Turns off the crusher collision so it can't hurt or push you.",
 })
 
-Groupboxes.Stairwell_Misc:AddToggle("StairwellLandingSpam", {
-	Text = "TP to trash and drop trash.",
-	Tooltip = "Combine with orbit, or bring all dropped items.",
-	Default = false,
-})
 
 Toggles.DisableStairwellCrusherCollision:OnChanged(function(DisableStairwellCrusherCollisionState)
 	if not DisableStairwellCrusherCollisionState then return end
@@ -3993,369 +3865,22 @@ Toggles.DisableStairwellCrusherCollision:OnChanged(function(DisableStairwellCrus
 		end
 	end)
 end)
-Toggles.DeleteStairwellCrusherExceptBasicWall:OnChanged(function(DeleteStairwellCrusherExceptBasicWallState)
-	if not DeleteStairwellCrusherExceptBasicWallState then return end
-
-	task.spawn(function()
-		while Toggles.DeleteStairwellCrusherExceptBasicWall.Value do
-			for _, DeleteStairwellCrusherRoom in ipairs(workspace.CurrentRooms:GetChildren()) do
-				local DeleteStairwellCrusherAssets = DeleteStairwellCrusherRoom:FindFirstChild("Assets")
-				if DeleteStairwellCrusherAssets then
-					for _, DeleteStairwellCrusherContainer in ipairs(DeleteStairwellCrusherAssets:GetChildren()) do
-						if DeleteStairwellCrusherContainer.Name == "StairwellCrusherContainer1" then
-							local DeleteStairwellCrusherToDestroy = {}
-							for _, DeleteStairwellCrusherDescendant in ipairs(DeleteStairwellCrusherContainer:GetDescendants()) do
-								local DeleteStairwellCrusherUnderBasicWall = false
-								local DeleteStairwellCrusherParent = DeleteStairwellCrusherDescendant.Parent
-								while DeleteStairwellCrusherParent and DeleteStairwellCrusherParent ~= DeleteStairwellCrusherContainer do
-									if DeleteStairwellCrusherParent.Name == "BasicWall" then
-										DeleteStairwellCrusherUnderBasicWall = true
-										break
-									end
-									DeleteStairwellCrusherParent = DeleteStairwellCrusherParent.Parent
-								end
-								if not DeleteStairwellCrusherUnderBasicWall and DeleteStairwellCrusherDescendant.Name ~= "BasicWall" then
-									DeleteStairwellCrusherToDestroy[#DeleteStairwellCrusherToDestroy + 1] = DeleteStairwellCrusherDescendant
-								end
-							end
-							for _, DeleteStairwellCrusherInstance in ipairs(DeleteStairwellCrusherToDestroy) do
-								if DeleteStairwellCrusherInstance and DeleteStairwellCrusherInstance.Parent then
-									DeleteStairwellCrusherInstance:Destroy()
-								end
-							end
-						end
-					end
-				end
-			end
-			task.wait(0.5)
-		end
-	end)
-end)
-
-Toggles.MeldRemover:OnChanged(function(State)
-	if not State then return end
-	task.spawn(function()
-		while Toggles.MeldRemover.Value do
-			for _, room in pairs(workspace.CurrentRooms:GetChildren()) do
-				for _, folderName in ipairs({"Assets", "Parts"}) do
-					local folder = room:FindFirstChild(folderName)
-					if folder then
-						for _, child in ipairs(folder:GetChildren()) do
-							if child.Name == "MeldWall"
-								or child.Name == "Boleahghth29tdgfhy2thuy2htuu259uhh3u" -- no qeustions asked
-							then
-								child:Destroy()
-							end
-						end
-					end
-				end
-				for _, name in ipairs({"MeldData", "MeldPads", "Meldview", "Meld"}) do
-					local obj = room:FindFirstChild(name)
-					if obj and obj:IsA("Folder") then
-						obj:Destroy()
-					end
-				end
-			end
-			task.wait(0.5)
-		end
-	end)
-end)
 
 
 
 
-local StairwellLandingToken = 0
-
-Toggles.StairwellLandingSpam:OnChanged(function(Value)
-	StairwellLandingToken += 1
-
-	if not Value then
-		return
-	end
-
-	local CurrentToken = StairwellLandingToken
-
-	task.spawn(function()
-		-- DontGroup
-		local CurrentRooms = workspace.CurrentRooms
-		local LocalPlayer = Services.Players.LocalPlayer
-
-		while Toggles.StairwellLandingSpam.Value and CurrentToken == StairwellLandingToken do
-			local StairwellModels = {}
-
-			for _, Room in ipairs(CurrentRooms:GetChildren()) do
-				local StairwellLandingLogic = Room:FindFirstChild("StairwellLandingLogic")
-
-				if StairwellLandingLogic then
-					for _, Model in ipairs(StairwellLandingLogic:GetChildren()) do
-						if Model:IsA("Model") then
-							local Prompts = {}
-
-							for _, Object in ipairs(Model:GetDescendants()) do
-								if Object:IsA("ProximityPrompt") then
-									Prompts[#Prompts + 1] = Object
-								end
-							end
-
-							if #Prompts > 0 then
-								StairwellModels[#StairwellModels + 1] = {
-									Model = Model,
-									Prompts = Prompts,
-								}
-							end
-						end
-					end
-				end
-			end
-
-			table.sort(StairwellModels, function(First, Second)
-				local FirstRoom = First.Model.Parent and First.Model.Parent.Parent
-				local SecondRoom = Second.Model.Parent and Second.Model.Parent.Parent
-
-				return (tonumber(FirstRoom and FirstRoom.Name) or math.huge) <
-					(tonumber(SecondRoom and SecondRoom.Name) or math.huge)
-			end)
-
-			for _, Data in ipairs(StairwellModels) do
-				if not Toggles.StairwellLandingSpam.Value or CurrentToken ~= StairwellLandingToken then
-					break
-				end
-
-				local Model = Data.Model
-
-				while Model.Parent
-					and Model:IsDescendantOf(workspace)
-					and Toggles.StairwellLandingSpam.Value
-					and CurrentToken == StairwellLandingToken do
-
-					local Character = LocalPlayer.Character
-					local HumanoidRootPart = Character and Character:FindFirstChild("HumanoidRootPart")
-
-					if HumanoidRootPart then
-						HumanoidRootPart.CFrame = Model:GetPivot() + Vector3.new(0, 5, 0)
-
-						for Index = 1, #Data.Prompts do
-							local Prompt = Data.Prompts[Index]
-
-							if Prompt.Parent and Prompt.Enabled and fireproximityprompt then
-								fireproximityprompt(Prompt)
-							end
-						end
-
-						if keypress and keyrelease then
-							keypress(0x58)
-							task.wait(0.03)
-							keyrelease(0x58)
-						elseif DHub
-							and DHub.Environment
-							and DHub.Environment.keypress
-							and DHub.Environment.keyrelease then
-
-							DHub.Environment.keypress(0x58)
-							task.wait(0.03)
-							DHub.Environment.keyrelease(0x58)
-						end
-					end
-
-					Services.RunService.Heartbeat:Wait()
-				end
-			end
-
-			Services.RunService.Heartbeat:Wait()
-		end
-	end)
-end)
 
 
-Groupboxes.Stairwell_Misc:AddDivider()
 
-Groupboxes.Stairwell_Misc:AddButton("TP Shopping Carts To Player", function()
-	local ShoppingCartTargetName = Options.ShoppingCartTarget.Value
-	local ShoppingCartTargetPlayer = game.Players:FindFirstChild(ShoppingCartTargetName)
-	if not ShoppingCartTargetPlayer or not ShoppingCartTargetPlayer.Character then return end
-	local ShoppingCartTargetCFrame = ShoppingCartTargetPlayer.Character:GetPivot()
-	for _, ShoppingCartModel in ipairs(workspace.Misc:GetChildren()) do
-		if ShoppingCartModel.Name == "ShoppingCart" and ShoppingCartModel:IsA("Model") then
-			ShoppingCartModel:PivotTo(ShoppingCartTargetCFrame)
-		end
-	end
-end)
-
-Groupboxes.Stairwell_Misc:AddDropdown("ShoppingCartTarget", {
-	Text = "Shopping Cart Target",
-	Values = (function()
-		local ShoppingCartPlayerNames = {}
-		for _, ShoppingCartPlayer in ipairs(game.Players:GetPlayers()) do
-			ShoppingCartPlayerNames[#ShoppingCartPlayerNames + 1] = ShoppingCartPlayer.Name
-		end
-		return ShoppingCartPlayerNames
-	end)(),
-	Default = game.Players.LocalPlayer.Name,
-})
-
-Groupboxes.Stairwell_Misc:AddButton("Refresh Players", function()
-	local ShoppingCartPlayerNames = {}
-	for _, ShoppingCartPlayer in ipairs(game.Players:GetPlayers()) do
-		ShoppingCartPlayerNames[#ShoppingCartPlayerNames + 1] = ShoppingCartPlayer.Name
-	end
-	Options.ShoppingCartTarget:SetValues(ShoppingCartPlayerNames)
-end)
 
 Groupboxes.Stairwell_Experimental = Tabs.Stairwell:AddRightGroupbox("Experimental")
 
 
-local function TPDropsToNearestGrinder()
-    local TPDropsToNearestGrinderDropsFolder =
-        workspace:FindFirstChild("Drops")
-
-    local TPDropsToNearestGrinderRootPart =
-        Character and Character:FindFirstChild("HumanoidRootPart")
-
-    if not TPDropsToNearestGrinderDropsFolder
-        or not TPDropsToNearestGrinderRootPart
-        or not CurrentRooms then
-        return
-    end
-
-    local TPDropsToNearestGrinderPlayerPosition =
-        TPDropsToNearestGrinderRootPart.Position
-
-    local TPDropsToNearestGrinderNearestGrinder = nil
-    local TPDropsToNearestGrinderNearestDistance = math.huge
-
-    for _, TPDropsToNearestGrinderRoom in
-        ipairs(CurrentRooms:GetChildren()) do
-
-        local TPDropsToNearestGrinderScrapper =
-            TPDropsToNearestGrinderRoom:FindFirstChild(
-                "StairwellScrapper",
-                true
-            )
-
-        if TPDropsToNearestGrinderScrapper then
-            for _, TPDropsToNearestGrinderObject in
-                ipairs(TPDropsToNearestGrinderScrapper:GetDescendants()) do
-
-                if TPDropsToNearestGrinderObject.Name == "Grinder1"
-                    and (
-                        TPDropsToNearestGrinderObject:IsA("Model")
-                        or TPDropsToNearestGrinderObject:IsA("BasePart")
-                    ) then
-
-                    local TPDropsToNearestGrinderPosition =
-                        TPDropsToNearestGrinderObject:GetPivot().Position
-
-                    local TPDropsToNearestGrinderDistance =
-                        (
-                            TPDropsToNearestGrinderPlayerPosition
-                            - TPDropsToNearestGrinderPosition
-                        ).Magnitude
-
-                    if TPDropsToNearestGrinderDistance
-                        < TPDropsToNearestGrinderNearestDistance then
-
-                        TPDropsToNearestGrinderNearestDistance =
-                            TPDropsToNearestGrinderDistance
-
-                        TPDropsToNearestGrinderNearestGrinder =
-                            TPDropsToNearestGrinderObject
-                    end
-                end
-            end
-        end
-    end
-
-    if not TPDropsToNearestGrinderNearestGrinder then
-        return
-    end
-
-    local TPDropsToNearestGrinderCFrame =
-        TPDropsToNearestGrinderNearestGrinder:GetPivot()
-
-    for _, TPDropsToNearestGrinderDropItem in
-        ipairs(TPDropsToNearestGrinderDropsFolder:GetChildren()) do
-
-        if TPDropsToNearestGrinderDropItem:IsA("Model")
-            or TPDropsToNearestGrinderDropItem:IsA("BasePart") then
-
-            TPDropsToNearestGrinderDropItem:PivotTo(
-                TPDropsToNearestGrinderCFrame
-            )
-        end
-    end
-end
-
-Groupboxes.Stairwell_Experimental:AddButton({
-    Text = "TP All Drops to Nearest Grinder",
-    Func = TPDropsToNearestGrinder,
-    DoubleClick = false,
-    Tooltip = "Teleports every dropped item to the grinder closest to you",
-})
-
-local function BringDroppedItems()
-	local workspaceDropsFolder = workspace:FindFirstChild("Drops")
-	if LocalPlayer and LocalPlayer.Character then
-		local playerHumanoidRootPart = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-		if playerHumanoidRootPart and workspaceDropsFolder then
-			for _, itemToBring in ipairs(workspaceDropsFolder:GetChildren()) do
-				if itemToBring:IsA("Model") then
-					itemToBring:PivotTo(playerHumanoidRootPart.CFrame)
-				elseif itemToBring:IsA("BasePart") then
-					itemToBring.CFrame = playerHumanoidRootPart.CFrame
-				end
-			end
-		end
-	end
-end
-
-Groupboxes.Stairwell_Experimental:AddButton({
-	Text = "Bring Dropped Items",
-	Func = function() BringDroppedItems() end,
-	DoubleClick = false,
-	Tooltip = "Brings all dropped items."
-})
-
-Groupboxes.Stairwell_Experimental:AddToggle("EnableDroppedItemsInterval", {
-	Text = "Enable Interval",
-	Default = false,
-	Tooltip = "Automatically brings dropped items at the selected interval."
-})
-
-Groupboxes.Stairwell_Experimental:AddSlider("DroppedItemsInterval", {
-	Text = "Interval",
-	Default = 1,
-	Min = 0,
-	Max = 60,
-	Rounding = 1,
-	Compact = false,
-	Tooltip = "How often dropped items are brought."
-})
-
-Toggles.EnableDroppedItemsInterval:OnChanged(function(enabled)
-	if enabled then
-		if droppedItemsIntervalRunning then return end
-		droppedItemsIntervalRunning = true
-		task.spawn(function()
-			while Toggles.EnableDroppedItemsInterval.Value do
-				BringDroppedItems()
-				local interval = Options.DroppedItemsInterval.Value
-				if interval <= 0 then
-					task.wait()
-				else
-					task.wait(interval)
-				end
-			end
-			droppedItemsIntervalRunning = false
-		end)
-	end
-end)
-
-Groupboxes.Stairwell_Experimental:AddDivider()
 
 Groupboxes.Stairwell_Experimental:AddToggle("OrbitDroppedItems", {
 	Text = "Orbit Dropped Items",
 	Default = false,
-	Tooltip = "Orbits dropped items around you. Teleports them to you every 10s to prevent despawn."
+	Tooltip = "Spins every dropped item around you. They are pulled back to you every 10s so they don't despawn."
 })
 
 Groupboxes.Stairwell_Experimental:AddSlider("OrbitDroppedItemsHeight", {
@@ -4365,7 +3890,7 @@ Groupboxes.Stairwell_Experimental:AddSlider("OrbitDroppedItemsHeight", {
 	Max = 20,
 	Rounding = 1,
 	Compact = false,
-	Tooltip = "The height of the orbit."
+	Tooltip = "How high above you the items circle."
 })
 
 Groupboxes.Stairwell_Experimental:AddSlider("OrbitDroppedItemsDistance", {
@@ -4375,7 +3900,7 @@ Groupboxes.Stairwell_Experimental:AddSlider("OrbitDroppedItemsDistance", {
 	Max = 50,
 	Rounding = 1,
 	Compact = false,
-	Tooltip = "The distance of the orbit."
+	Tooltip = "How far from you the items circle."
 })
 
 Groupboxes.Stairwell_Experimental:AddSlider("OrbitDroppedItemsSpeed", {
@@ -4385,7 +3910,7 @@ Groupboxes.Stairwell_Experimental:AddSlider("OrbitDroppedItemsSpeed", {
 	Max = 20,
 	Rounding = 1,
 	Compact = false,
-	Tooltip = "The speed of the orbit."
+	Tooltip = "How fast the items circle."
 })
 
 Toggles.OrbitDroppedItems:OnChanged(function(OrbitDroppedItemsEnabled)
@@ -4445,58 +3970,6 @@ Toggles.OrbitDroppedItems:OnChanged(function(OrbitDroppedItemsEnabled)
 	end)
 end)
 
-Toggles.AntiNoise:OnChanged(function(value)
-	for i = #Connections, 1, -1 do
-		local conn = Connections[i]
-		if conn and conn.Disconnect then
-			conn:Disconnect()
-		end
-		table.remove(Connections, i)
-	end
-	if not value then return end
-	local antiNoiseConn = RunService.PreSimulation:Connect(function(dt)
-		if not value then return end
-		if not LocalPlayer:GetAttribute("Alive") then return end
-		local character = LocalPlayer.Character
-		if not character then return end
-		local rootPart = character:FindFirstChild("HumanoidRootPart")
-		local humanoid = character:FindFirstChildOfClass("Humanoid")
-		local camera = workspace.CurrentCamera
-		if not rootPart or not humanoid or not camera then return end
-		if humanoid.Health <= 0 then return end
-		if rootPart.Anchored then return end
-		local state = humanoid:GetState()
-		if state == Enum.HumanoidStateType.Dead
-			or state == Enum.HumanoidStateType.Ragdoll
-			or state == Enum.HumanoidStateType.Climbing
-			or state == Enum.HumanoidStateType.Swimming then
-			return
-		end
-		humanoid.AutoRotate = false
-		humanoid:Move(Vector3.zero, false)
-		local inputVector = Controls:GetMoveVector()
-		local inputMagnitude = inputVector.Magnitude
-		if inputMagnitude <= 0 then
-			rootPart.AssemblyLinearVelocity = Vector3.zero
-			return
-		end
-		local cameraCFrame = camera.CFrame
-		local cameraForward = Vector3.new(cameraCFrame.LookVector.X, 0, cameraCFrame.LookVector.Z)
-		local cameraRight = Vector3.new(cameraCFrame.RightVector.X, 0, cameraCFrame.RightVector.Z)
-		if cameraForward.Magnitude < 0.001 or cameraRight.Magnitude < 0.001 then return end
-		cameraForward = cameraForward.Unit
-		cameraRight = cameraRight.Unit
-		local worldDirection = (cameraRight * inputVector.X) + (cameraForward * -inputVector.Z)
-		if worldDirection.Magnitude <= 0 then return end
-		worldDirection = worldDirection.Unit
-		local finalSpeed = humanoid.WalkSpeed * math.clamp(inputMagnitude, 0, 1)
-		local clampedDt = math.clamp(dt, 0, 1 / 30)
-		rootPart.AssemblyLinearVelocity = Vector3.zero
-		rootPart.CFrame = rootPart.CFrame + (worldDirection * finalSpeed * clampedDt)
-		rootPart.CFrame = CFrame.new(rootPart.Position, rootPart.Position + worldDirection)
-	end)
-	Connections[#Connections + 1] = antiNoiseConn
-end)
 
 Toggles.BypassNoise:OnChanged(function(value)
 	for i = #Connections, 1, -1 do
@@ -4538,68 +4011,16 @@ Toggles.BypassNoise:OnChanged(function(value)
 	end
 end)
 
-Toggles.DroppedItemValue:OnChanged(function(DroppedItemValue)
-	local DroppedItemValueScreenGui = game:GetService("CoreGui"):FindFirstChild("DropsCoinCounter")
-	if not DroppedItemValue then
-		if DroppedItemValueScreenGui then DroppedItemValueScreenGui:Destroy() end
-		return
-	end
-	local DroppedItemValueWorkspaceDrops = workspace:WaitForChild("Drops")
-	if DroppedItemValueScreenGui then DroppedItemValueScreenGui:Destroy() end
-	DroppedItemValueScreenGui = Instance.new("ScreenGui")
-	DroppedItemValueScreenGui.Name = "DropsCoinCounter"
-	DroppedItemValueScreenGui.ResetOnSpawn = false
-	DroppedItemValueScreenGui.Parent = game:GetService("CoreGui")
-	local DroppedItemValueCoinText = Instance.new("TextLabel")
-	DroppedItemValueCoinText.Name = "CoinText"
-	DroppedItemValueCoinText.AnchorPoint = Vector2.new(0.5, 0)
-	DroppedItemValueCoinText.Position = UDim2.new(0.5, 0, 0.02, 0)
-	DroppedItemValueCoinText.Size = UDim2.new(0, 250, 0, 40)
-	DroppedItemValueCoinText.BackgroundTransparency = 1
-	DroppedItemValueCoinText.Text = "Items: 0"
-	DroppedItemValueCoinText.TextSize = 24
-	DroppedItemValueCoinText.Font = Enum.Font.GothamBold
-	DroppedItemValueCoinText.TextColor3 = Color3.fromRGB(255, 255, 255)
-	DroppedItemValueCoinText.TextStrokeTransparency = 0.5
-	DroppedItemValueCoinText.Parent = DroppedItemValueScreenGui
-	local DroppedItemValueCountedDrops = {}
-	task.spawn(function()
-		while Toggles.DroppedItemValue.Value do
-			for _, DroppedItemValueDrop in ipairs(DroppedItemValueWorkspaceDrops:GetChildren()) do
-				if DroppedItemValueDrop:IsA("Model") and not DroppedItemValueCountedDrops[DroppedItemValueDrop] then
-					DroppedItemValueDrop:SetAttribute("CoinsChecked", true)
-					DroppedItemValueCountedDrops[DroppedItemValueDrop] = true
-				end
-			end
-			for DroppedItemValueDrop in pairs(DroppedItemValueCountedDrops) do
-				if not DroppedItemValueDrop.Parent or DroppedItemValueDrop.Parent ~= DroppedItemValueWorkspaceDrops then
-					DroppedItemValueCountedDrops[DroppedItemValueDrop] = nil
-				end
-			end
-			local DroppedItemValueTotalItems = 0
-			for DroppedItemValueDrop in pairs(DroppedItemValueCountedDrops) do
-				if DroppedItemValueDrop.Parent == DroppedItemValueWorkspaceDrops then
-					DroppedItemValueTotalItems += 1
-				end
-			end
-			DroppedItemValueCoinText.Text = "Items: " .. DroppedItemValueTotalItems
-			task.wait(1)
-		end
-		if DroppedItemValueScreenGui and DroppedItemValueScreenGui.Parent then
-			DroppedItemValueScreenGui:Destroy()
-		end
-	end)
-end)
 
 
 Groupboxes.Exploits_BypassRight = Tabs.Exploits:AddRightGroupbox("Bypass")
 Groupboxes.Exploits_BypassRight:AddToggle("DisableAnticheat", {
 	Text = "Anticheat Bypass", Default = false,
-	Tooltip = "Completely disables the anticheat, after interacting with a ladder."
+	Tooltip = "Turns the anticheat off after you grab a ladder. It comes back after a cutscene or halt room."
 })
 Groupboxes.Exploits_BypassRight:AddToggle("VelocityManipulationToggle", {
-	Text = "Velocity", Default = false,
-	Tooltip = "Moves your character forward slowly, mitigating the game's anti-noclip."
+	Text = "Velocity Manipulation", Default = false,
+	Tooltip = "Keeps nudging you forward so the anti-noclip check doesn't pull you back."
 })
 Toggles.DisableAnticheat:OnChanged(function(Value)
 	if Globals.AnticheatDisabled == true and not Value then
@@ -4608,14 +4029,14 @@ Toggles.DisableAnticheat:OnChanged(function(Value)
 	end
 end)
 Toggles.VelocityManipulationToggle:AddKeyPicker("VelocityManipulationKeybind", {
-	Text = "Velocity", Default = "V",
+	Text = "Velocity Manipulation", Default = "V",
 	Mode = Library.IsMobile and "Toggle" or "Hold", SyncToggleState = true
 })
 
 Groupboxes.Exploits_BypassRight:AddDivider()
 Groupboxes.Exploits_BypassRight:AddToggle("InfiniteItemsToggle", {
 	Text = "Infinite Items", Default = false,
-	Tooltip = "Allows certain items to be used without draining their uses.",
+	Tooltip = "Selected items keep their durability when you use them.",
 	Disabled = not Functions.CheckCompatability({"fireproximityprompt"}),
 	DisabledTooltip = Globals.IncompatibleMessage
 })
@@ -4632,7 +4053,7 @@ Groupboxes.Exploits_BypassRight:AddDropdown("InfiniteItemsList", {
 Groupboxes.Exploits_BypassRight:AddDivider()
 Groupboxes.Exploits_BypassRight:AddToggle("PositionSpoof", {
 	Text = "God Mode", Default = false,
-	Tooltip = "Makes your character appear underground on the server, protecting you from rush-like entities."
+	Tooltip = "Hides your character underground on the server, so rush-type entities pass over you."
 })
 Toggles.PositionSpoof:OnChanged(function(Value)
 	if Floor ~= "Fools" and Floor ~= "OldHotel" then
@@ -4651,16 +4072,16 @@ Toggles.PositionSpoof:AddKeyPicker("PositionSpoof", {
 })
 
 Groupboxes.Exploits_Remove = Tabs.Exploits:AddRightGroupbox("Remove")
-Groupboxes.Exploits_Remove:AddToggle("RemoveScreech", { Text = "Remove Screech",  Default = false, Tooltip = "Prevents 'Screech' from spawning." })
-Groupboxes.Exploits_Remove:AddToggle("RemoveHalt",    { Text = "Remove Halt",     Default = false, Tooltip = "Prevents 'Halt' from spawning." })
-Groupboxes.Exploits_Remove:AddToggle("RemoveA90",     { Text = "Remove A-90",     Default = false, Tooltip = "Prevents 'A-90' from spawning." })
-Groupboxes.Exploits_Remove:AddToggle("RemoveDread",   { Text = "Remove Dread",    Default = false, Tooltip = "Prevents 'Dread' from spawning." })
-Groupboxes.Exploits_Remove:AddToggle("RemoveSurge", { Text = "Remove Surge", Default = false, Tooltip = "Prevents 'Surge' from spawning."})
+Groupboxes.Exploits_Remove:AddToggle("RemoveScreech", { Text = "Remove Screech",  Default = false, Tooltip = "Screech never spawns." })
+Groupboxes.Exploits_Remove:AddToggle("RemoveHalt",    { Text = "Remove Halt",     Default = false, Tooltip = "Halt never spawns." })
+Groupboxes.Exploits_Remove:AddToggle("RemoveA90",     { Text = "Remove A-90",     Default = false, Tooltip = "A-90 never spawns." })
+Groupboxes.Exploits_Remove:AddToggle("RemoveDread",   { Text = "Remove Dread",    Default = false, Tooltip = "Dread never spawns." })
+Groupboxes.Exploits_Remove:AddToggle("RemoveSurge", { Text = "Remove Surge", Default = false, Tooltip = "Surge never spawns."})
 Groupboxes.Exploits_Remove:AddDivider()
-Groupboxes.Exploits_Remove:AddToggle("NoScreechDamage", { Text = "No Screech Damage", Default = false, Tooltip = "Prevents 'Screech' from hurting you." })
-Groupboxes.Exploits_Remove:AddToggle("NoHaltDamage",    { Text = "No Halt Damage",    Default = false, Tooltip = "Prevents 'Halt' from hurting you." })
-Groupboxes.Exploits_Remove:AddToggle("NoA90Damage",     { Text = "No A-90 Damage",    Default = false, Tooltip = "Prevents 'A-90' from hurting you." })
-Groupboxes.Exploits_Remove:AddToggle("NoSurgeDamage",   { Text = "No Surge Damage",   Default = false, Tooltip = "Prevents 'Surge' from hurting you." })
+Groupboxes.Exploits_Remove:AddToggle("NoScreechDamage", { Text = "No Screech Damage", Default = false, Tooltip = "Screech's hit does no damage." })
+Groupboxes.Exploits_Remove:AddToggle("NoHaltDamage",    { Text = "No Halt Damage",    Default = false, Tooltip = "Halt's hit does no damage." })
+Groupboxes.Exploits_Remove:AddToggle("NoA90Damage",     { Text = "No A-90 Damage",    Default = false, Tooltip = "A-90's hit does no damage." })
+Groupboxes.Exploits_Remove:AddToggle("NoSurgeDamage",   { Text = "No Surge Damage",   Default = false, Tooltip = "Surge's hit does no damage." })
 
 Toggles.NoScreechDamage:OnChanged(function(Value)
 	if Value then
@@ -4746,9 +4167,9 @@ end)
 Globals.JamMuffle = Services.SoundService:WaitForChild("Main"):FindFirstChild("Jamming") or Instance.new("EqualizerSoundEffect")
 
 Groupboxes.Exploits_Remove:AddDivider()
-Groupboxes.Exploits_Remove:AddToggle("RemoveFootstepSounds",    { Text = "Remove Footstep Sounds",    Default = false, Tooltip = "Removes the sounds when walking." })
-Groupboxes.Exploits_Remove:AddToggle("RemoveJamminMusic",       { Text = "Remove Jammin Music",       Default = false, Tooltip = "Removes the music and muffle effect from the 'Jammin' modifier." })
-Groupboxes.Exploits_Remove:AddToggle("RemoveInteractingSounds", { Text = "Remove Interacting Sounds", Default = false, Tooltip = "Removes the sounds when interacting with proximity prompts." })
+Groupboxes.Exploits_Remove:AddToggle("RemoveFootstepSounds",    { Text = "Remove Footstep Sounds",    Default = false, Tooltip = "Mutes your footsteps." })
+Groupboxes.Exploits_Remove:AddToggle("RemoveJamminMusic",       { Text = "Remove Jammin Music",       Default = false, Tooltip = "Cuts the music and the muffle filter added by the 'Jammin' modifier." })
+Groupboxes.Exploits_Remove:AddToggle("RemoveInteractingSounds", { Text = "Remove Interacting Sounds", Default = false, Tooltip = "Mutes the click and hold sounds of interact prompts." })
 
 Toggles.RemoveJamminMusic:OnChanged(function(Value)
 	local Jam = Globals.MainUI.Initiator.Main_Game.Health:FindFirstChild("Jam")
@@ -4767,21 +4188,21 @@ end)
 
 Groupboxes.Visuals_LeftTab = Tabs.Visuals:AddLeftTabbox("Camera / Effects")
 Groupboxes.Visuals_Camera = Groupboxes.Visuals_LeftTab:AddTab("Camera")
-Groupboxes.Visuals_Camera:AddToggle("AmbientToggle", { Text = "Ambient", Default = false, Tooltip = "Changes the lighting color to the specified value." })
+Groupboxes.Visuals_Camera:AddToggle("AmbientToggle", { Text = "Ambient", Default = false, Tooltip = "Tints the ambient light with the colour you pick." })
 Groupboxes.Visuals_Camera:AddSlider("FieldOfView", { Text = "Field of View", Min = 1, Max = 120, Default = 70, Rounding = 0 })
 Groupboxes.Visuals_Camera:AddDivider()
 Groupboxes.Visuals_Camera:AddToggle("RemoveCameraShake", {
-	Text = "Remove Camera Shake", Default = false, Tooltip = "Prevents the camera from shaking.",
+	Text = "Remove Camera Shake", Default = false, Tooltip = "Stops all screen shake.",
 	Disabled = not Functions.CheckCompatability({"require"}), DisabledTooltip = Globals.IncompatibleMessage
 })
 Groupboxes.Visuals_Camera:AddToggle("RemoveCameraBobbing", {
-	Text = "Remove Camera Bobbing", Default = false, Tooltip = "Prevents the camera from bobbing when moving.",
+	Text = "Remove Camera Bobbing", Default = false, Tooltip = "Keeps the view steady while you walk.",
 	Disabled = not Functions.CheckCompatability({"require"}), DisabledTooltip = Globals.IncompatibleMessage
 })
-Groupboxes.Visuals_Camera:AddToggle("RemoveCutscenes", { Text = "Remove Cutscenes", Default = false, Tooltip = "Removes all non-necessary cutscenes." })
-Groupboxes.Visuals_Camera:AddToggle("RemoveCameraFog", { Text = "Remove Fog", Default = false, Tooltip = "Removes all fog effects from the camera." })
+Groupboxes.Visuals_Camera:AddToggle("RemoveCutscenes", { Text = "Remove Cutscenes", Default = false, Tooltip = "Skips every cutscene that isn't required to progress." })
+Groupboxes.Visuals_Camera:AddToggle("RemoveCameraFog", { Text = "Remove Fog", Default = false, Tooltip = "Clears fog so you can see further." })
 Groupboxes.Visuals_Camera:AddDivider()
-Groupboxes.Visuals_Camera:AddToggle("ThirdPersonToggle", { Text = "Third Person", Default = false, Tooltip = "Zooms out your camera, allowing you to see your character from behind." })
+Groupboxes.Visuals_Camera:AddToggle("ThirdPersonToggle", { Text = "Third Person", Default = false, Tooltip = "Pulls the camera back to a third-person view. Offsets are set below." })
 Toggles.ThirdPersonToggle:AddKeyPicker("ThirdPersonKeybind", { Text = "Third Person", Default = "T", Mode = "Toggle", SyncToggleState = true })
 Groupboxes.Visuals_Camera:AddSlider("ThirdPersonOffsetX", { Text = "X Offset", Min = -10, Max = 10, Default = 1.5, Rounding = 1, Compact = true })
 Groupboxes.Visuals_Camera:AddSlider("ThirdPersonOffsetY", { Text = "Y Offset", Min = -10, Max = 10, Default = 1,   Rounding = 1, Compact = true })
@@ -4822,7 +4243,7 @@ Toggles.RemoveCutscenes:OnChanged(function(Value)
 end)
 
 Groupboxes.Visuals_Effects = Groupboxes.Visuals_LeftTab:AddTab("Effects")
-Groupboxes.Visuals_Effects:AddToggle("TransparentHidingSpotsToggle", { Text = "Transparent Hiding Spots", Default = false, Tooltip = "Makes a hiding spot transparent when you enter it." })
+Groupboxes.Visuals_Effects:AddToggle("TransparentHidingSpotsToggle", { Text = "Transparent Hiding Spots", Default = false, Tooltip = "Fades the hiding spot out while you are inside so you can see around you." })
 Groupboxes.Visuals_Effects:AddSlider("TransparentHidingSpotsSlider", { Text = "Transparency", Min = 0, Max = 1, Default = 0.5, Rounding = 2, Compact = true })
 
 local function ApplyHidingTransparency(Value, SliderValue)
@@ -4852,13 +4273,13 @@ Options.TransparentHidingSpotsSlider:OnChanged(function(Value)
 end)
 
 Groupboxes.Visuals_Effects:AddDivider()
-Groupboxes.Visuals_Effects:AddToggle("DisableGlitchJumpscare",   { Text = "Disable Glitch Jumpscare",   Default = false, Tooltip = "Disables the jumpscare from 'Glitch'" })
-Groupboxes.Visuals_Effects:AddToggle("DisableTimothyJumpscare",  { Text = "Disable Timothy Jumpscare",  Default = false, Tooltip = "Disables the jumpscare from 'Timothy'" })
-Groupboxes.Visuals_Effects:AddToggle("DisableVoidJumpscare",     { Text = "Disable Void Jumpscare",     Default = false, Tooltip = "Disables the jumpscare from 'Void'" })
+Groupboxes.Visuals_Effects:AddToggle("DisableGlitchJumpscare",   { Text = "Disable Glitch Jumpscare",   Default = false, Tooltip = "Hides Glitch's jumpscare screen." })
+Groupboxes.Visuals_Effects:AddToggle("DisableTimothyJumpscare",  { Text = "Disable Timothy Jumpscare",  Default = false, Tooltip = "Hides Timothy's jumpscare screen." })
+Groupboxes.Visuals_Effects:AddToggle("DisableVoidJumpscare",     { Text = "Disable Void Jumpscare",     Default = false, Tooltip = "Hides Void's jumpscare screen." })
 Groupboxes.Visuals_Effects:AddDivider()
-Groupboxes.Visuals_Effects:AddToggle("DisableHideVignette",      { Text = "Disable Hide Vignette",      Default = false, Tooltip = "Disables the hiding screen effect." })
-Groupboxes.Visuals_Effects:AddToggle("DisableFiredampEffect",    { Text = "Disable Firedamp Effect",    Default = false, Tooltip = "Disables the firedamp screen effect." })
-Groupboxes.Visuals_Effects:AddToggle("DisableEntityJumpscares",  { Text = "Disable Entity Jumpscares",  Default = false, Tooltip = "Disables jumpscares from entities like Rush and Ambush." })
+Groupboxes.Visuals_Effects:AddToggle("DisableHideVignette",      { Text = "Disable Hide Vignette",      Default = false, Tooltip = "Removes the dark vignette shown while hiding." })
+Groupboxes.Visuals_Effects:AddToggle("DisableFiredampEffect",    { Text = "Disable Firedamp Effect",    Default = false, Tooltip = "Removes the firedamp screen effect." })
+Groupboxes.Visuals_Effects:AddToggle("DisableEntityJumpscares",  { Text = "Disable Entity Jumpscares",  Default = false, Tooltip = "Hides the jumpscare screens of entities such as Rush and Ambush." })
 
 Toggles.DisableGlitchJumpscare:OnChanged(function(Value)
 	Modules.Glitch.Name = Value and "Glitch_Disabled" or "Glitch"
@@ -4945,7 +4366,7 @@ Groupboxes.Visuals_Entities:AddDropdown("EntityList", {
 	Values = { "All","Rush","Bash","Scribbles","Teller","DronesStampede","Creak","Noise","Noise_TV","Balls","Portrait","CreakHalloween","Weaveling","Ambush","Eyes","Halt","Blitz","Lookman","Gloombat Swarm","A-60","A-120","Sally","Jeff the Killer","Groundskeeper","Monument","AR0xMBUSH","RNIUSHCG==" },
 	Multi = true, AllowNull = true
 })
-Groupboxes.Visuals_Entities:AddToggle("NotifyEntities",    { Text = "Notify Entities",    Default = false, Tooltip = "Sends a notification when an entity spawns." })
+Groupboxes.Visuals_Entities:AddToggle("NotifyEntities",    { Text = "Notify Entities",    Default = false, Tooltip = "Pops a notification as soon as a selected entity spawns." })
 
 
 Groupboxes.Visuals_Entities:AddDivider()
@@ -4963,12 +4384,12 @@ Groupboxes.Visuals_Entities:AddDropdown("NotifyItemList", {
 	Values = ItemsToNotify,
 	Multi = true, AllowNull = true
 })
-Groupboxes.Visuals_Entities:AddToggle("NotifyItemsToggle",    { Text = "Notify Items",    Default = false, Tooltip = "Sends a notification when an item spawns." })
-Groupboxes.Visuals_Entities:AddToggle("NotifyItemsShowDistance",    { Text = "Show Distance",    Default = false, Tooltip = "Shows how far away the item is in the notification." })
+Groupboxes.Visuals_Entities:AddToggle("NotifyItemsToggle",    { Text = "Notify Items",    Default = false, Tooltip = "Pops a notification whenever a selected item shows up." })
+Groupboxes.Visuals_Entities:AddToggle("NotifyItemsShowDistance",    { Text = "Show Distance",    Default = false, Tooltip = "Adds the distance to the item notification." })
 Groupboxes.Visuals_Entities:AddDivider()
-Groupboxes.Visuals_Entities:AddToggle("NotifyLibraryCode", { Text = "Notify Library Code", Default = false, Tooltip = "Automatically solves the code for the library padlock." })
-Groupboxes.Visuals_Entities:AddToggle("NotifyOxygen",      { Text = "Notify Oxygen Level", Default = false, Tooltip = "Shows how much oxygen you have remaining." })
-Groupboxes.Visuals_Entities:AddToggle("NotifyHasteTime",   { Text = "Notify Haste Time",   Default = false, Tooltip = "Shows how much time you have remaining before 'Haste' spawns." })
+Groupboxes.Visuals_Entities:AddToggle("NotifyLibraryCode", { Text = "Notify Library Code", Default = false, Tooltip = "Shows the padlock code as soon as enough hints are collected." })
+Groupboxes.Visuals_Entities:AddToggle("NotifyOxygen",      { Text = "Notify Oxygen Level", Default = false, Tooltip = "Shows your oxygen level as a caption whenever it changes." })
+Groupboxes.Visuals_Entities:AddToggle("NotifyHasteTime",   { Text = "Notify Haste Time",   Default = false, Tooltip = "Shows the time left before Haste spawns." })
 
 -- Entity notifications are fixed: Diamond style, sound on (volume 3), chat off.
 Globals.EntityChat = false
@@ -5010,7 +4431,7 @@ local function MakeESPToggle(ToggleKey, ColorKey, Text, Tooltip, ObjectsTable, L
 	end)
 end
 
-Groupboxes.Visuals_ESP_Toggles:AddToggle("ObjectiveESPToggle", { Text = "Objectives", Default = false, Tooltip = "Highlights all objects required to progress." })
+Groupboxes.Visuals_ESP_Toggles:AddToggle("ObjectiveESPToggle", { Text = "Objectives", Default = false, Tooltip = "Marks everything you need to interact with to move forward." })
 Toggles.ObjectiveESPToggle:AddColorPicker("ObjectiveESPColor", { Text = "Objectives", Default = Color3.fromRGB(80, 255, 130), Transparency = 0 })
 
 local ObjectiveLabels = {
@@ -5064,14 +4485,14 @@ Options.ObjectiveESPColor:OnChanged(function(Value)
 	end
 end)
 
-Groupboxes.Visuals_ESP_Toggles:AddToggle("DoorESPToggle",       { Text = "Doors",        Default = false, Tooltip = "Highlights the next door." })
-Groupboxes.Visuals_ESP_Toggles:AddToggle("HidingSpotESPToggle", { Text = "Hiding Spots", Default = false, Tooltip = "Highlights places where you can hide from entities" })
-Groupboxes.Visuals_ESP_Toggles:AddToggle("PlayerESPToggle",     { Text = "Players",      Default = false, Tooltip = "Highlights other players." })
-Groupboxes.Visuals_ESP_Toggles:AddToggle("ChestESPToggle",      { Text = "Chests",       Default = false, Tooltip = "Highlights objects that can contain loot." })
-Groupboxes.Visuals_ESP_Toggles:AddToggle("ItemESPToggle",       { Text = "Items",        Default = false, Tooltip = "Highlights all collectable items/consumables." })
-Groupboxes.Visuals_ESP_Toggles:AddToggle("CurrencyESPToggle",   { Text = "Currency",     Default = false, Tooltip = "Highlights all currency that spawns." })
-Groupboxes.Visuals_ESP_Toggles:AddToggle("LadderESPToggle",     { Text = "Ladders",      Default = false, Tooltip = "Highlights ladders that can be used to disable the anticheat." })
-Groupboxes.Visuals_ESP_Toggles:AddToggle("MiscESPToggle",       { Text = "Misc",         Default = false, Tooltip = "Highlights miscellaneous objects that can be used to disable the anticheat." })
+Groupboxes.Visuals_ESP_Toggles:AddToggle("DoorESPToggle",       { Text = "Doors",        Default = false, Tooltip = "Marks the next door." })
+Groupboxes.Visuals_ESP_Toggles:AddToggle("HidingSpotESPToggle", { Text = "Hiding Spots", Default = false, Tooltip = "Marks every closet, locker, bed and other hiding spot." })
+Groupboxes.Visuals_ESP_Toggles:AddToggle("PlayerESPToggle",     { Text = "Players",      Default = false, Tooltip = "Marks the other players in the run." })
+Groupboxes.Visuals_ESP_Toggles:AddToggle("ChestESPToggle",      { Text = "Chests",       Default = false, Tooltip = "Marks chests and anything else that holds loot." })
+Groupboxes.Visuals_ESP_Toggles:AddToggle("ItemESPToggle",       { Text = "Items",        Default = false, Tooltip = "Marks every item you can pick up." })
+Groupboxes.Visuals_ESP_Toggles:AddToggle("CurrencyESPToggle",   { Text = "Currency",     Default = false, Tooltip = "Marks gold and other currency pickups." })
+Groupboxes.Visuals_ESP_Toggles:AddToggle("LadderESPToggle",     { Text = "Ladders",      Default = false, Tooltip = "Marks ladders, which you need for the anticheat bypass." })
+Groupboxes.Visuals_ESP_Toggles:AddToggle("MiscESPToggle",       { Text = "Misc",         Default = false, Tooltip = "Marks other objects that can switch the anticheat off." })
 Groupboxes.Visuals_ESP_Toggles:AddDivider()
 Groupboxes.Visuals_ESP_Toggles:AddDropdown("EntityESPOptions",     { 
 	Text = "Entity List",
@@ -5080,7 +4501,7 @@ Groupboxes.Visuals_ESP_Toggles:AddDropdown("EntityESPOptions",     {
 	Multi = true,
 	AllowNull = true
 })
-Groupboxes.Visuals_ESP_Toggles:AddToggle("EntityESPToggle",     { Text = "Entities",      Default = false, Tooltip = "Highlights all entities that spawn." })
+Groupboxes.Visuals_ESP_Toggles:AddToggle("EntityESPToggle",     { Text = "Entities",      Default = false, Tooltip = "Marks the entities picked in the list above." })
 
 Toggles.DoorESPToggle:AddColorPicker("DoorESPColor",           { Text = "Doors",        Default = Color3.fromRGB(70, 170, 255),  Transparency = 0 })
 Toggles.HidingSpotESPToggle:AddColorPicker("HidingSpotESPColor", { Text = "Hiding Spots", Default = Color3.fromRGB(255, 150, 60),  Transparency = 0 })
@@ -5281,8 +4702,8 @@ Options.MiscESPColor:OnChanged(function(Value)
 	for _, Object in Objects.Misc do DHub.ESPLibrary:UpdateObjectColor(Object, Value) end
 end)
 
-Groupboxes.Visuals_ESP_Settings:AddToggle("ESPRainbow",     { Text = "Rainbow Effect", Default = false, Tooltip = "Makes the esp objects change colour like a rainbow." })
-Groupboxes.Visuals_ESP_Settings:AddToggle("ESPShowDistance",{ Text = "Show Distance",  Default = true,  Tooltip = "Shows how far away your character is from the object." })
+Groupboxes.Visuals_ESP_Settings:AddToggle("ESPRainbow",     { Text = "Rainbow Effect", Default = false, Tooltip = "Cycles every ESP colour through the rainbow." })
+Groupboxes.Visuals_ESP_Settings:AddToggle("ESPShowDistance",{ Text = "Show Distance",  Default = true,  Tooltip = "Adds the distance to every ESP label." })
 Groupboxes.Visuals_ESP_Settings:AddDivider()
 Groupboxes.Visuals_ESP_Settings:AddSlider("ESPFillTransparency",        { Text = "Fill Transparency",         Min = 0, Max = 1, Default = 0.75, Rounding = 2, Compact = true })
 Groupboxes.Visuals_ESP_Settings:AddSlider("ESPOutlineTransparency",     { Text = "Outline Transparency",      Min = 0, Max = 1, Default = 0,    Rounding = 2, Compact = true })
@@ -5299,10 +4720,10 @@ Groupboxes.Visuals_ESP_Settings:AddDropdown("ESPTextFont", {
 Groupboxes.Visuals_ESP_Settings:AddDivider()
 Groupboxes.Visuals_ESP_Settings:AddDropdown("ESPTracersOrigin",  { Text = "Tracer Origin", Values = { "Bottom","Center","Top","Mouse" }, Default = 1 })
 Groupboxes.Visuals_ESP_Settings:AddSlider("ESPTracerThickness",  { Text = "Tracer Thickness", Min = 0.5, Max = 2, Default = 0.75, Rounding = 2, Compact = true })
-Groupboxes.Visuals_ESP_Settings:AddToggle("ESPTracersToggle",    { Text = "Enable Tracers", Default = false, Tooltip = "Draws a line to highlighted objects." })
+Groupboxes.Visuals_ESP_Settings:AddToggle("ESPTracersToggle",    { Text = "Enable Tracers", Default = false, Tooltip = "Draws a line from the screen to each highlighted object." })
 Groupboxes.Visuals_ESP_Settings:AddDivider()
 Groupboxes.Visuals_ESP_Settings:AddSlider("ESPArrowsRadius",     { Text = "Arrow Radius", Min = 100, Max = 500, Default = 250, Rounding = 0, Compact = true })
-Groupboxes.Visuals_ESP_Settings:AddToggle("ESPArrowsToggle",     { Text = "Enable Arrows", Default = false, Tooltip = "Shows arrow that point to off-screen objects." })
+Groupboxes.Visuals_ESP_Settings:AddToggle("ESPArrowsToggle",     { Text = "Enable Arrows", Default = false, Tooltip = "Shows arrows at the screen edge pointing to off-screen objects." })
 
 DHub.ESPLibrary:SetRainbow(false)
 DHub.ESPLibrary:SetShowDistance(true)
@@ -5342,7 +4763,7 @@ Groupboxes.Rooms_Automation = Tabs.Rooms:AddLeftGroupbox("Automation")
 Groupboxes.Rooms_Misc = Tabs.Rooms:AddRightGroupbox("Misc")
 
 Groupboxes.Mines_Automation:AddToggle("AutoSteerMinecart", {
-	Text = "Auto Minecart", Default = false, Tooltip = "Automatically completes the minecart chase.",
+	Text = "Auto Minecart", Default = false, Tooltip = "Steers and ducks for you through the whole minecart chase.",
 	Disabled = not Functions.CheckCompatability({"require"}), DisabledTooltip = Globals.IncompatibleMessage
 })
 Groupboxes.Mines_Automation:AddSlider("AutoSteerMinecartTurnDistance", {
@@ -5353,14 +4774,14 @@ Groupboxes.Mines_Automation:AddSlider("AutoSteerMinecartDuckDistance", {
 	Text = "Crouch Distance", Min = 20, Max = 40, Default = 30, Rounding = 0,
 	Disabled = not Functions.CheckCompatability({"require"}), DisabledTooltip = Globals.IncompatibleMessage
 })
-Groupboxes.Rooms_Automation:AddToggle("RoomsAutoWalk",             { Text = "Auto Rooms",       Default = false, Tooltip = "Automatically moves and hides from entities in The Rooms." })
+Groupboxes.Rooms_Automation:AddToggle("RoomsAutoWalk",             { Text = "Auto Rooms",       Default = false, Tooltip = "Walks through The Rooms by itself and hides when an entity comes." })
 Groupboxes.Rooms_Automation:AddSlider("RoomsAutoWalkPathfindTimeout", { Text = "Pathfind Timeout", Min = 0.5, Max = 3, Default = 1, Rounding = 1 })
-Groupboxes.Rooms_Automation:AddToggle("RoomsAutoWalkShowPathToggle", { Text = "Show Path",       Default = false, Tooltip = "Shows the current path of rooms auto-walk." })
+Groupboxes.Rooms_Automation:AddToggle("RoomsAutoWalkShowPathToggle", { Text = "Show Path",       Default = false, Tooltip = "Draws the route Auto Rooms is currently following." })
 Groupboxes.Rooms_Automation:AddToggle("RoomsAutoWalkSpoofFootsteps", {
-    Text = "Spoof Footsteps", Default = false, Tooltip = "Makes it appear as if your character is walking normally.",
+    Text = "Spoof Footsteps", Default = false, Tooltip = "Fakes normal walking so the server sees footsteps while Auto Rooms moves you.",
     Disabled = not Functions.CheckCompatability({"hookmetamethod", "newcclosure", "getnamecallmethod"}), DisabledTooltip = Globals.IncompatibleMessage
 })
-Groupboxes.Rooms_Misc:AddToggle("RoomsAutoWalkIgnoreA60",    { Text = "Anti A-60",        Default = false, Tooltip = "Keeps Auto Rooms walking while entity 'A-60' is present, enables God Mode automatically." })
+Groupboxes.Rooms_Misc:AddToggle("RoomsAutoWalkIgnoreA60",    { Text = "Anti A-60",        Default = false, Tooltip = "Auto Rooms keeps walking when A-60 spawns. Turns God Mode on for you." })
 
 Toggles.RoomsAutoWalk:OnChanged(function()
 	for _, Object in Globals.RoomsNodesFolder:GetChildren() do
@@ -5540,294 +4961,8 @@ Connections.RoomsHandler = CurrentRooms.ChildAdded:Connect(function(Room)
 		if Object.Name == "StuckPart" then Object:Destroy() end
 	end
 
-	if Room:GetAttribute("RawName") and string.find(Room:GetAttribute("RawName"), "Eyestalk") then
-        local PreviousNode = nil
-
-		local function CreateEyestalkNode(WaypointPos)
-			local NewNode = Instance.new("Part")
-			NewNode.Size = Vector3.one
-			NewNode.Transparency = 1
-			NewNode.Parent = Globals.SeekNodesFolder
-			NewNode.Anchored = true
-			NewNode.Position = WaypointPos
-			NewNode.CanCollide = false
-			NewNode.Name = "SeekLightNode"
-
-			local PrevNode = PreviousNode or NewNode
-			PreviousNode = NewNode
-
-			local NewBeam = Instance.new("Beam")
-			NewBeam.Color = ColorSequence.new({ ColorSequenceKeypoint.new(0, Options.ShowEyestalkPathColor.Value), ColorSequenceKeypoint.new(1, Options.ShowEyestalkPathColor.Value) })
-			NewBeam.FaceCamera = true
-			NewBeam.Width0 = 0.2
-			NewBeam.Width1 = 0.2
-			NewBeam.Brightness = 10
-			NewBeam.LightInfluence = 0
-			NewBeam.LightEmission = 0
-			NewBeam.Enabled = true
-
-			local Vis = Toggles.ShowEyestalkPathToggle.Value and 0 or 1
-			NewBeam.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, Vis), NumberSequenceKeypoint.new(1, Vis) })
-			NewBeam.Parent = Globals.SeekNodesFolder
-
-			local A0 = Instance.new("Attachment", NewNode)
-			local A1 = Instance.new("Attachment", PrevNode)
-			NewBeam.Attachment0 = A0
-			NewBeam.Attachment1 = A1
-
-			table.insert(Objects.EyestalkHighlights, NewBeam)
-		end
-
-		Room:WaitForChild("RoomEntrance", 9e9)
-		Room:WaitForChild("RoomExit", 9e9)
-
-		while not Room:GetAttribute("PathFound") do
-			if Toggles.ShowEyestalkPathToggle.Value then
-				local EyePath = game:GetService("PathfindingService"):CreatePath({
-					AgentCanJump = false, AgentCanClimb = false, WaypointSpacing = 2, AgentRadius = 1, AgentHeight = 1
-				})
-				EyePath:ComputeAsync(RootPart.Position, Room.RoomExit.Position)
-				if EyePath.Status == Enum.PathStatus.Success then
-					Room:SetAttribute("PathFound", true)
-					for _, Waypoint in EyePath:GetWaypoints() do
-						CreateEyestalkNode(Waypoint.Position)
-						task.wait()
-					end
-                    break
-				end
-			end
-			task.wait(0.25)
-		end
-	end
 end)
 
-Groupboxes.Mines_Completion = Tabs.Mines:AddRightGroupbox("Completion")
-Groupboxes.Ripple_Completion = Tabs.Ripple:AddLeftGroupbox("Completion")
-Groupboxes.Mines_Completion:AddButton({
-    Text = "Auto Complete Dam Seek",
-    Tooltip = "Automatically teleports to and interacts with each water pump.",
-    Func = function()
-        if LatestRoom.Value < 100 or Floor ~= "Mines" then
-            Functions.Notify({Title = "You must be in Room 200 to do this."})
-            return
-        end
-
-		local IsCutscene = false
-		local CutsceneConnection = RemotesFolder.Cutscene.OnClientEvent:Connect(function()
-			IsCutscene = true
-			task.wait(7)
-			IsCutscene = false
-		end)
-
-        local function GetNextPump()
-            local Highest = {
-                Height = -69420,
-                Object = nil
-            }
-            for _, Object in pairs(Objects.Objectives) do
-                if Object.Name == "WaterPump" and Object:GetAttribute("Diamond_Completed") ~= true then
-                    if Object.PrimaryPart and Object.PrimaryPart.Position.Y > Highest.Height then
-                        Highest.Object = Object
-                        Highest.Height = Object.PrimaryPart.Position.Y
-                    end
-                end
-            end
-            return Highest.Object
-        end
-
-        local function HandlePump(Pump)
-
-            while task.wait(0.1) do
-				if IsCutscene then
-					continue
-				end
-
-                Character:PivotTo(Pump:GetPivot())
-
-                local Prompt = Pump:FindFirstChild("ValvePrompt", true)
-                if Prompt then
-                    Functions.ForceFirePrompt(Prompt)
-                end
-
-                if Pump:GetAttribute("Diamond_Completed") then
-                    break
-                end
-            end
-        end
-
-        Functions.Notify({Title = "Attempting to complete the valves.", Body = "Please wait."})
-        while task.wait(0.1) do
-            local Pump = GetNextPump()
-            if Pump then
-                HandlePump(Pump)
-            else
-                break
-            end
-        end
-        Functions.Notify({Title = "Successfully completed the valves."})
-    end
-})
-
-Groupboxes.Ripple_Completion:AddButton({
-    Text = "Auto Complete Cringle",
-    Tooltip = "Instantly completes the quest.",
-    Func = function()
-        local TouchPart = CurrentRooms:FindFirstChild("RippleExitDoor", true)
-        if TouchPart then
-            Character:PivotTo(TouchPart:GetPivot())
-        end
-    end
-})
-
-Groupboxes.Floors_Visuals = Tabs.Visuals:AddLeftGroupbox("Paths")
-Groupboxes.Floors_Visuals:AddToggle("ShowSeekPathToggle", {
-	Text = "Show Seek Path", Default = false, Tooltip = "Shows you the correct path in seek chases.",
-	Risky = Floor ~= "Mines"
-})
-Toggles.ShowSeekPathToggle:AddColorPicker("ShowSeekPathColor", { Text = "Seek Path", Default = Color3.fromRGB(0, 255, 0), Transparency = 0 })
-
-local function UpdateBeamVisibility(BeamTable, ColorKey, Visible)
-	local Vis = Visible and 0 or 1
-	local Seq = NumberSequence.new({ NumberSequenceKeypoint.new(0, Vis), NumberSequenceKeypoint.new(1, Vis) })
-	for _, Beam in BeamTable do Beam.Transparency = Seq end
-end
-local function UpdateBeamColor(BeamTable, Value)
-	local Seq = ColorSequence.new({ ColorSequenceKeypoint.new(0, Value), ColorSequenceKeypoint.new(1, Value) })
-	for _, Beam in BeamTable do Beam.Color = Seq end
-end
-
-Toggles.ShowSeekPathToggle:OnChanged(function(V)  UpdateBeamVisibility(Objects.SeekHighlights, "ShowSeekPathColor", V) end)
-Options.ShowSeekPathColor:OnChanged(function(V)   UpdateBeamColor(Objects.SeekHighlights, V) end)
-
-Groupboxes.Floors_Visuals:AddToggle("ShowEyestalkPathToggle", {
-	Text = "Show Eyestalk Path", Default = false, Tooltip = "Shows you the correct path in the eyestalk chase.",
-	Risky = Floor ~= "Garden"
-})
-Toggles.ShowEyestalkPathToggle:AddColorPicker("ShowEyestalkPathColor", { Text = "Eyestalk Path", Default = Color3.fromRGB(0, 255, 0), Transparency = 0 })
-Toggles.ShowEyestalkPathToggle:OnChanged(function(V) UpdateBeamVisibility(Objects.EyestalkHighlights, "ShowEyestalkPathColor", V) end)
-Options.ShowEyestalkPathColor:OnChanged(function(V)  UpdateBeamColor(Objects.EyestalkHighlights, V) end)
-
-Groupboxes.Exploits_Remove:AddDivider()
-Groupboxes.Exploits_Remove:AddToggle("RemoveSeekTrigger", {
-	Text = "Remove Seek Trigger", Default = false, Tooltip = "Diables the 'Seek' chase trigger.",
-	Risky = not (Floor == "Fools" or Floor == "OldHotel"),
-	Disabled = not Functions.CheckCompatability({"firetouchinterest"}), DisabledTooltip = Globals.IncompatibleMessage
-})
-Groupboxes.Exploits_Remove:AddToggle("RemoveFigure", {
-	Text = "Remove Figure", Default = false, Tooltip = "Completely removes the entity 'Figure' (doesn't always work).",
-	Risky = not (Floor == "Fools" or Floor == "OldHotel" or Floor == "Mines"),
-	Disabled = not Functions.CheckCompatability({"isnetworkowner"}), DisabledTooltip = Globals.IncompatibleMessage
-})
-Groupboxes.Exploits_BypassRight:AddToggle("AutoRevive", {
-	Text = "Infinite Revives", Default = false, Tooltip = "Automatically revives after dying, with unlimited respawns.",
-	Risky = not (Floor == "Fools" or Floor == "OldHotel")
-})
-Groupboxes.Exploits_BypassRight:AddToggle("FigureGodmode", {
-	Text = "Figure Godmode", Default = false, Tooltip = "Prevents 'Figure' from hurting you.",
-	Risky = not (Floor == "Fools" or Floor == "OldHotel")
-})
-Groupboxes.Exploits_Remove:AddDivider()
-Groupboxes.Exploits_Remove:AddToggle("RemoveBasementGate",  { Text = "Remove Basement Gate",   Default = false, Tooltip = "Removes the gate from basement rooms.",            Risky = not (Floor == "Fools" or Floor == "OldHotel") })
-Groupboxes.Exploits_Remove:AddToggle("RemovePaintingsDoor", { Text = "Remove Paintings Door",  Default = false, Tooltip = "Removes the fireplace doors from painting rooms.", Risky = not (Floor == "Fools" or Floor == "OldHotel") })
-Groupboxes.Exploits_Remove:AddToggle("RemoveSkeletonDoor",  { Text = "Remove Skeleton Door",   Default = false, Tooltip = "Removes the skeleton door from the infirmary.",    Risky = Floor ~= "Fools" })
-
-local ObstructionNames = { ThingToOpen = "RemoveBasementGate", MovingDoor = "RemovePaintingsDoor", Wax_Door = "RemoveSkeletonDoor" }
-for ObjName, ToggleName in ObstructionNames do
-	Toggles[ToggleName]:OnChanged(function(Value)
-		for _, Object in Objects.Obstructions do
-			if Object.Name == ObjName then
-				Object:PivotTo(Value and CFrame.new(-10000, -10000, -10000) or Object:GetAttribute("OriginalPosition"))
-			end
-		end
-	end)
-end
-
-Groupboxes.Floors_Farming = Tabs.Main:AddRightGroupbox("Farming")
-Groupboxes.Floors_Farming:AddToggle("KnobFarm", {
-    Text = "Knob Farm",
-    Default = false,
-    Tooltip = "Automatically gains knobs for you, dies and revives repeatedly.",
-	Risky = Floor ~= "Ballz",
-})
-
-Groupboxes.Floors_Farming:AddButton({
-    Text = "Start Knob Farm",
-    Tooltip = "Starts farming knobs, click this when you have enough gold.",
-    Func = function()
-		if LatestRoom.Value ~= 0 then
-			Functions.Notify({Title = "You must be in Room 0 to use this."})
-			return
-		end
-
-		if LocalPlayer.PlayerGui:FindFirstChild("TopbarUI") then 
-			local GoldCount = LocalPlayer.PlayerGui.TopbarUI.Topbar.StatsTopbarHandler.StatModules.Gold.GoldVal
-			if GoldCount.Value <= 0 then
-				Functions.Notify({Title = "You must have gold to do this."})
-				return
-			end
-		end
-
-        Globals.KnobFarmStarted = true
-    end
-})
-
-Groupboxes.Floors_Farming:AddDivider()
-Groupboxes.Floors_Farming:AddButton({
-	Text = "Start Death Farm",
-	DoubleClick = true,
-	Tooltip = "Automatically farms deaths, joining new runs.",
-	Func = function()
-		loadstring(game:HttpGet("https://raw.githubusercontent.com/bocaj111004/Abysall/refs/heads/main/Scripts/DeathFarm.luau"))()
-	end,
-
-	Disabled = not Functions.CheckCompatability({"fireproximityprompt", "firesignal"}),
-	DisabledTooltip = Globals.ImcompatibleMessage
-})
-Groupboxes.Floors_Farming:AddButton({
-	Text = "Copy Death Farm Loadstring",
-	DoubleClick = false,
-	Tooltip = "Copies the death farm loadstring to your clipboard.",
-	Func = function()
-		toclipboard([==[
-			loadstring(game:HttpGet("https://raw.githubusercontent.com/bocaj111004/Abysall/refs/heads/main/Scripts/DeathFarm.luau"))()
-		]==])
-		Library:Notify("Loadstring has been copied to your clipboard.")
-	end,
-
-	Disabled = not Functions.CheckCompatability({"fireproximityprompt", "firesignal"}),
-	DisabledTooltip = Globals.ImcompatibleMessage
-})
-
-Toggles.KnobFarm:OnChanged(function(Value)
-    if Value then
-        Functions.Notify({Title = "Please collect some gold to earn knobs.", Body = "Click 'Start Knob Farm' when you're ready."})
-	else
-		Globals.KnobFarmStarted = false
-    end
-end)
-
-Globals.KnobFarmActive = false
-Globals.KnobFarmStarted = false
-Connections.KnobFarm = Services.RunService.Heartbeat:Connect(function()
-	if Toggles.KnobFarm.Value and Globals.KnobFarmStarted then
-		if not Globals.KnobFarmActive then
-			Globals.KnobFarmActive = true
-			if Functions.CheckCompatability({"replicatesignal"}) then
-				DHub.Environment.replicatesignal(LocalPlayer.Kill)
-			else
-				LocalPlayer.Character.Humanoid.Health = 0
-			end
-			while task.wait() do
-				if LocalPlayer:GetAttribute("Alive") then
-					break
-				end
-			end
-			RemotesFolder.Statistics:FireServer()
-			task.wait(0.25)
-			Globals.KnobFarmActive = false
-		end
-	end
-end)
 
 local MainHook
 local OtherHook
@@ -5892,7 +5027,7 @@ Modules = {
 
 local CharacterOldConnectionKeys = {
 	"MainHandler", "JumpHandler", "SlideHandler", "LibraryCodeHandler1", "LibraryCodeHandler2",
-	"OxygenConnection", "AnimationHandler", "AutoHideConnection", "AutoReviveHandler",
+	"OxygenConnection", "AnimationHandler", "AutoHideConnection",
 	"SHMFixer", "AnticheatDisabler", "AnticheatEnableDetector1", "AnticheatEnableDetector2",
 	"AutoSteerMinecartDuckHandler", "AutoSolveAnchorsConnection",
 	"FootstepHandler"
@@ -6095,17 +5230,6 @@ Functions.HandleCharacter = function(NewCharacter)
 			Functions.Caption(Functions.FormatOxygen(NewOxy), true)
 		end
 		Globals.OldOxygen = NewOxy
-	end)
-
-	Connections.AutoReviveHandler = LocalPlayer:GetAttributeChangedSignal("Alive"):Connect(function()
-		if LocalPlayer:GetAttribute("Alive") == false and Toggles.AutoRevive.Value then
-			if Floor == "Fools" or Floor == "OldHotel" then
-				while LocalPlayer:GetAttribute("Alive") ~= true do
-					RemotesFolder.Revive:FireServer()
-					task.wait(0.5)
-				end
-			end
-		end
 	end)
 
 	Connections.SHMFixer = RootPart:GetPropertyChangedSignal("Anchored"):Connect(function()
@@ -6332,7 +5456,7 @@ Functions.HandleCharacter = function(NewCharacter)
 		end
 
 		if Floor == "OldHotel" or Floor == "Fools" then
-			local SpoofOffset = Toggles.PositionSpoof.Value and Functions.GetNearestEntity() and 200 or Toggles.FigureGodmode.Value and Functions.GetNearestFigure() and 200 or 0
+			local SpoofOffset = Toggles.PositionSpoof.Value and Functions.GetNearestEntity() and 200 or 0
 			Globals.SpoofOffset = SpoofOffset
 			Collision.Position = RootPart.Position + Vector3.new(0, SpoofOffset, 0)
 			Collision.CanCollide = false
@@ -6722,61 +5846,6 @@ Functions.HandleObject = function(Object)
 		end)
 		table.insert(Connections, DoorConn)
 
-	elseif Name == "PathLights" then
-		local ObjectsToHighlight = {}
-		local PLConn = Object.ChildAdded:Connect(function(Child)
-			table.insert(ObjectsToHighlight, Child)
-		end)
-		for _, Child in Object:GetChildren() do
-			table.insert(ObjectsToHighlight, Child)
-		end
-
-		local function CreateSeekNode(Light)
-			if Light.Name ~= "SeekGuidingLight" or Light:GetAttribute("Highlighted") then return end
-			Light:SetAttribute("Highlighted", true)
-
-			local NewNode = Instance.new("Part")
-			NewNode.Size = Vector3.one
-			NewNode.Transparency = 1
-			NewNode.Parent = Globals.SeekNodesFolder
-			NewNode.Anchored = true
-			NewNode.CFrame = Light.CFrame
-			NewNode.CanCollide = false
-			NewNode.Name = "SeekLightNode"
-
-			local PrevNode2 = PreviousNode or NewNode
-			PreviousNode = NewNode
-
-			local Beam = Instance.new("Beam")
-			Beam.Color = ColorSequence.new({ ColorSequenceKeypoint.new(0, Options.ShowSeekPathColor.Value), ColorSequenceKeypoint.new(1, Options.ShowSeekPathColor.Value) })
-			Beam.FaceCamera = true
-			Beam.Width0 = 0.2
-			Beam.Width1 = 0.2
-			Beam.Brightness = 10
-			Beam.LightInfluence = 0
-			Beam.LightEmission = 0
-			Beam.Enabled = true
-			local Vis = Toggles.ShowSeekPathToggle.Value and 0 or 1
-			Beam.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, Vis), NumberSequenceKeypoint.new(1, Vis) })
-			Beam.Parent = Globals.SeekNodesFolder
-			local A0 = Instance.new("Attachment", NewNode)
-			local A1 = Instance.new("Attachment", PrevNode2)
-			Beam.Attachment0 = A0
-			Beam.Attachment1 = A1
-			table.insert(Objects.SeekHighlights, Beam)
-			Light:Destroy()
-		end
-
-		task.spawn(function()
-			while task.wait() do
-				local Light = table.remove(ObjectsToHighlight, 1)
-				if Light then CreateSeekNode(Light) end
-			end
-		end)
-
-		table.insert(Connections, PLConn)
-		table.insert(Objects.PathLights, Object)
-		Object.Destroying:Once(function() PLConn:Disconnect() end)
 	elseif Name == "SeekMovingNewClone" then
 		local Connection = Object.Destroying:Connect(function()
 			for _, Folder in pairs(Objects.PathLights) do
@@ -6941,20 +6010,6 @@ Functions.HandleObject = function(Object)
 		table.insert(Connections, Connection)
 		table.insert(Objects.Entities, Object)
 	elseif Name == "TriggerEventCollision" and Functions.CheckCompatability({"firetouchinterest"}) then
-		if (Floor == "Fools" or Floor == "OldHotel") and Toggles.RemoveSeekTrigger.Value then
-			task.spawn(function()
-				while Object:IsDescendantOf(game) do
-					for _, Part in Object:GetChildren() do
-						if Part:IsA("BasePart") then
-							DHub.Environment.firetouchinterest(RootPart, Part, 0)
-							task.wait()
-							DHub.Environment.firetouchinterest(RootPart, Part, 1)
-						end
-					end
-					task.wait()
-				end
-			end)
-		end
 		table.insert(Objects.EventTriggers, Object)
 	elseif Name == "DoorFake" or Name == "FakeDoor" then
 		if Object.Parent and Object:FindFirstChild("Hidden") then
@@ -7055,41 +6110,6 @@ Functions.HandleObject = function(Object)
 		end
 		if Toggles.EntityESPToggle.Value and Options.EntityESPOptions.Value["Figure"] then Functions.AddESP({ Object = Object, Text = "Figure", Color = Options.EntityESPColor.Value }, true) end
 		table.insert(Objects.Entities, Object)
-		if Toggles.RemoveFigure.Value and Functions.CheckCompatability({"isnetworkowner"}) then
-			if Floor == "Mines" then
-				for _, Part in Object:GetDescendants() do
-					if Part:IsA("BasePart") then
-						task.spawn(function()
-							if DHub.Environment.isnetworkowner(Part) then
-								Part.Position = Vector3.new(-49999, -49999, -49999)
-							end
-						end)
-					end
-				end
-			elseif Floor == "OldHotel" or Floor == "Fools" then
-				CurrentRooms.ChildAdded:Wait()
-				for _, Part in Object:GetDescendants() do
-					if Part:IsA("BasePart") then
-						Part.CanCollide = false
-						task.spawn(function()
-							while DHub.Environment.isnetworkowner(Part) do
-								Part.Position = Vector3.new(math.random(-29999,29999), math.random(-29999,29999), math.random(-29999,29999))
-								task.wait()
-							end
-						end)
-					end
-				end
-			end
-		end
-	elseif (Name == "ThingToOpen" or Name == "MovingDoor") and (Floor == "Fools" or Floor == "OldHotel")
-		or Name == "Wax_Door" and Floor == "Fools"
-	then
-		Object:SetAttribute("OriginalPosition", Object:GetPivot())
-		local ToggleMap = { ThingToOpen = "RemoveBasementGate", MovingDoor = "RemovePaintingsDoor", Wax_Door = "RemoveSkeletonDoor" }
-		if ToggleMap[Name] and Toggles[ToggleMap[Name]].Value then
-			Object:PivotTo(CFrame.new(-10000, -10000, -10000))
-		end
-		table.insert(Objects.Obstructions, Object)
 	elseif Name == "ElevatorBreaker" then
 		if Toggles.AutoBreakerBox.Value and not Globals.BreakerBoxNotified then
 			Functions.Notify({ Title = "Interact with the breaker box.", Body = "It will be automatically solved." })
@@ -7253,9 +6273,6 @@ local AllowedInstances = {
 }
 
 Functions.QueueObject = function(Object)
-	if TimeShowerClone and Object:IsDescendantOf(TimeShowerClone) then
-		return
-	end
 	local IsHidingSpot = typeof(Object.Name) == "string" and string.find(string.lower(Object.Name), "hidingspot")
 	if not AllowedInstances[Object.Name] and not IsHidingSpot and Object.ClassName ~= "ProximityPrompt" and Object.Parent ~= CurrentRooms and not ItemNames[Object.Name] then
 		return
@@ -7807,7 +6824,6 @@ LocalPlayer.CharacterAdded:Connect(function(NewCharacter)
 end)
 
 Library:OnUnload(function()
-	StopTimeShower(true)
 	for Key, Connection in Connections do
 		if type(Key) == "string" then
 			pcall(function() Connection:Disconnect() end)
@@ -7972,10 +6988,24 @@ do
 	register(Library.Options)
 end
 DWin:AddSettingsTab("Settings")
+do
+	-- Colours saved before the palette change would override the new ESP defaults: reset them once.
+	local StateIO = DWin._stateIO
+	local Saved = StateIO and StateIO.read()
+	if type(Saved) == "table" and type(Saved.flags) == "table" and Saved.flags["d__palette"] == nil then
+		for Flag in pairs(Saved.flags) do
+			if type(Flag) == "string" and Flag:match("ESPColor$") then
+				Saved.flags[Flag] = nil
+			end
+		end
+		Saved.flags["d__palette"] = 2
+		StateIO.write(Saved)
+	end
+	DWin.Flags["d__palette"] = { Get = function() return 2 end, Set = function() end }
+end
 DWin:RestoreState()
 
 
-Functions.Notify({ Title = "Successfully loaded in " .. math.floor((tick() - LoadStart) * 1000) / 1000 .. " seconds." , Body = "Press '" .. tostring(Options.MenuKeybind.Value) .. "' to toggle the UI."})
 end
 DoorsMain()
 end, function(e)
