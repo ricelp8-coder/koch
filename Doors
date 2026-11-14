@@ -651,8 +651,8 @@ loadstring(game:HttpGet(%q))()]]):format(AE.file, AE.file, AE_SCRIPT_URL)
             Library.ToggleKeybind = Library.Options.MenuKeybind
         end)
         pcall(function()
-            menu:AddDivider()
-            Lib.AEToggle = menu:AddToggle("DiamondAutoExecute", {
+            local scriptBox = tab.Obs:AddGroupbox({Side = "Right", Name = "Script", IconName = "power"})
+            Lib.AEToggle = scriptBox:AddToggle("DiamondAutoExecute", {
                 Text = "Auto Execute", Default = false,
                 Tooltip = "Reruns the script after every teleport (Play Again, lobby and next run)",
                 Callback = function(v)
@@ -670,9 +670,7 @@ loadstring(game:HttpGet(%q))()]]):format(AE.file, AE.file, AE_SCRIPT_URL)
                     end
                 end,
             })
-        end)
-        pcall(function()
-            menu:AddButton("Unload", function() Library:Unload() end)
+            scriptBox:AddButton("Unload", function() Library:Unload() end)
         end)
         local ok, err = pcall(function()
             ThemeManager:SetLibrary(Library)
@@ -2695,9 +2693,6 @@ Groupboxes.General_Character:AddToggle("FreeCamToggle", {
 	Text = "FreeCam", Default = false,
 	Tooltip = "Detaches the camera so you can fly around the map. Your character stays where it is."
 })
-Toggles.FreeCamToggle:AddKeyPicker("FreeCamKeybind", {
-	Text = "FreeCam", Default = "None", Mode = "Toggle", SyncToggleState = true
-})
 Groupboxes.General_Character:AddSlider("FreeCamSpeed", {
 	Text = "FreeCam Speed", Min = 5, Max = 250, Default = 45, Rounding = 0, Compact = true
 })
@@ -2772,9 +2767,17 @@ do
 	Gui.Name = DHub.ESPLibrary:GenerateRandomString()
 	Gui.ResetOnSpawn = false
 	Gui.IgnoreGuiInset = true
-	Gui.DisplayOrder = 32766
+	Gui.DisplayOrder = 500
 	Gui.Enabled = false
 	Gui.Parent = GetHiddenContainer()
+
+	local LookPad = Instance.new("Frame")
+	LookPad.Name = "LookPad"
+	LookPad.Size = UDim2.fromScale(1, 1)
+	LookPad.BackgroundTransparency = 1
+	LookPad.Active = UIS.TouchEnabled
+	LookPad.ZIndex = 0
+	LookPad.Parent = Gui
 
 	local function Round(Object, Radius)
 		local Corner = Instance.new("UICorner")
@@ -2795,6 +2798,8 @@ do
 	Base.Size = UDim2.fromOffset(130, 130)
 	Base.BackgroundColor3 = NAVY
 	Base.BackgroundTransparency = 0.25
+	Base.Active = true
+	Base.ZIndex = 2
 	Base.Parent = Gui
 	Round(Base)
 	Stroke(Base, OUTLINE, 3)
@@ -2817,6 +2822,8 @@ do
 		Button.BackgroundColor3 = NAVY
 		Button.BackgroundTransparency = 0.25
 		Button.AutoButtonColor = false
+		Button.Active = true
+		Button.ZIndex = 2
 		Button.Text = Text
 		Button.TextColor3 = TEXT
 		Button.Font = Enum.Font.GothamBold
@@ -2866,8 +2873,7 @@ do
 		FreeCam.Pitch = math.clamp(FreeCam.Pitch - math.rad(Delta.Y * 0.25), math.rad(-85), math.rad(85))
 	end
 
-	Connections.FreeCamInputBegan = UIS.InputBegan:Connect(function(Input, Processed)
-		if not Globals.FreeCamActive or Processed then return end
+	LookPad.InputBegan:Connect(function(Input)
 		if Input.UserInputType == Enum.UserInputType.Touch and not FreeCam.LookInput then
 			FreeCam.LookInput = Input
 		end
@@ -2943,7 +2949,13 @@ do
 		CAS:BindActionAtPriority("DiamondFreeCamSink", function() return Enum.ContextActionResult.Sink end, false, 3000,
 			Enum.KeyCode.W, Enum.KeyCode.A, Enum.KeyCode.S, Enum.KeyCode.D, Enum.KeyCode.Space)
 		Gui.Enabled = true
-		Services.RunService:BindToRenderStep("DiamondFreeCam", 2000, Step)
+		Services.RunService:BindToRenderStep("DiamondFreeCam", 2000, function(DeltaTime)
+			local Success, Reason = pcall(Step, DeltaTime)
+			if not Success and not FreeCam.Warned then
+				FreeCam.Warned = true
+				warn("[DiamondHub] FreeCam: " .. tostring(Reason))
+			end
+		end)
 	end
 
 	Toggles.FreeCamToggle:OnChanged(function(Value)
@@ -6966,12 +6978,15 @@ Connections.FloorReplicatedHandler = FloorReplicated.DescendantAdded:Connect(fun
 end)
 
 do
+	local RED = Color3.fromHex("ff4650")
+	local Urgent = false
+	local Placed = false
+
 	local Frame = Instance.new("Frame")
 	Frame.Name = "HasteTimer"
-	Frame.AnchorPoint = Vector2.new(0.5, 0)
-	Frame.Position = UDim2.new(0.5, 0, 0, 62)
+	Frame.AnchorPoint = Vector2.new(0.5, 0.5)
+	Frame.Position = UDim2.fromScale(0.5, 0.82)
 	Frame.Size = UDim2.fromOffset(168, 54)
-	Frame.BackgroundColor3 = Color3.fromHex("0d1228")
 	Frame.BackgroundTransparency = 0.12
 	Frame.Visible = false
 	Frame.Parent = Container
@@ -6979,7 +6994,6 @@ do
 	Corner.CornerRadius = UDim.new(0, 10)
 	Corner.Parent = Frame
 	local Line = Instance.new("UIStroke")
-	Line.Color = Color3.fromHex("3d6bff")
 	Line.Thickness = 1.5
 	Line.Parent = Frame
 
@@ -6989,7 +7003,6 @@ do
 	Title.Size = UDim2.new(1, 0, 0, 14)
 	Title.Font = Enum.Font.GothamBold
 	Title.Text = "HASTE"
-	Title.TextColor3 = Color3.fromHex("3d6bff")
 	Title.TextSize = 11
 	Title.Parent = Frame
 
@@ -6999,7 +7012,6 @@ do
 	Time.Size = UDim2.new(1, 0, 0, 30)
 	Time.Font = Enum.Font.Michroma
 	Time.Text = "--:--"
-	Time.TextColor3 = Color3.fromHex("eef2ff")
 	Time.TextSize = 22
 	Time.Parent = Frame
 
@@ -7007,30 +7019,76 @@ do
 	Bar.AnchorPoint = Vector2.new(0.5, 1)
 	Bar.Position = UDim2.new(0.5, 0, 1, -4)
 	Bar.Size = UDim2.new(1, -20, 0, 2)
-	Bar.BackgroundColor3 = Color3.fromHex("3d6bff")
 	Bar.BorderSizePixel = 0
 	Bar.Parent = Frame
 
+	local function Accent() return Urgent and RED or Library.Scheme.AccentColor end
+	local function FontColor() return Urgent and RED or Library.Scheme.FontColor end
+	local Registered = {
+		[Frame] = { BackgroundColor3 = "BackgroundColor" },
+		[Line] = { Color = Accent },
+		[Title] = { TextColor3 = "AccentColor" },
+		[Time] = { TextColor3 = FontColor },
+		[Bar] = { BackgroundColor3 = Accent },
+	}
+	for Object, Properties in Registered do
+		Library:AddToRegistry(Object, Properties)
+	end
+	local function Repaint()
+		Frame.BackgroundColor3 = Library.Scheme.BackgroundColor
+		Line.Color = Accent()
+		Title.TextColor3 = Library.Scheme.AccentColor
+		Time.TextColor3 = FontColor()
+		Bar.BackgroundColor3 = Accent()
+	end
+	Repaint()
+
+	local function Place()
+		if Placed then return end
+		local MainUI = LocalPlayer.PlayerGui:FindFirstChild("MainUI")
+		local MainFrame = MainUI and MainUI:FindFirstChild("MainFrame")
+		local Caption = MainFrame and MainFrame:FindFirstChild("Caption")
+		if Caption then
+			Frame.AnchorPoint = Caption.AnchorPoint
+			Frame.Position = Caption.Position
+			Placed = true
+		end
+	end
+
 	Functions.UpdateHasteTimer = function()
-		local Visible = Toggles.NotifyHasteTime.Value
+		local Timer = FloorReplicated:FindFirstChild("DigitalTimer")
+		local Visible = Toggles.NotifyHasteTime.Value and Timer ~= nil
 		Frame.Visible = Visible
 		if not Visible then return end
+		Place()
 		Time.Text = Functions.GetHasteTime()
-		local Timer = FloorReplicated:FindFirstChild("DigitalTimer")
-		local Urgent = Timer and Timer.Value <= 30
-		Time.TextColor3 = Urgent and Color3.fromHex("ff4650") or Color3.fromHex("eef2ff")
-		Bar.BackgroundColor3 = Urgent and Color3.fromHex("ff4650") or Color3.fromHex("3d6bff")
-		Line.Color = Bar.BackgroundColor3
+		Urgent = Timer.Value <= 30
+		Repaint()
 	end
 	Toggles.NotifyHasteTime:OnChanged(function() Functions.UpdateHasteTimer() end)
-	Library:OnUnload(function() pcall(function() Frame:Destroy() end) end)
-end
-
-if FloorReplicated:FindFirstChild("DigitalTimer") then
-	Connections.HasteTimerConnection = FloorReplicated.DigitalTimer:GetPropertyChangedSignal("Value"):Connect(function()
-		Functions.UpdateHasteTimer()
+	Library:OnUnload(function()
+		for Object in Registered do
+			Library.Registry[Object] = nil
+		end
+		pcall(function() Frame:Destroy() end)
 	end)
 end
+
+local function BindHasteTimer(Timer)
+	if Connections.HasteTimerConnection then Connections.HasteTimerConnection:Disconnect() end
+	Connections.HasteTimerConnection = Timer:GetPropertyChangedSignal("Value"):Connect(function()
+		Functions.UpdateHasteTimer()
+	end)
+	Functions.UpdateHasteTimer()
+end
+local ExistingHasteTimer = FloorReplicated:FindFirstChild("DigitalTimer")
+if ExistingHasteTimer then BindHasteTimer(ExistingHasteTimer) end
+Connections.HasteTimerAdded = FloorReplicated.ChildAdded:Connect(function(Child)
+	if Child.Name == "DigitalTimer" then BindHasteTimer(Child) end
+end)
+Connections.HasteTimerRemoved = FloorReplicated.ChildRemoved:Connect(function(Child)
+	if Child.Name == "DigitalTimer" then Functions.UpdateHasteTimer() end
+end)
 
 Connections.FogHandler = Services.Lighting:GetPropertyChangedSignal("FogEnd"):Connect(function()
 	if Services.Lighting.FogEnd ~= 10000000 then

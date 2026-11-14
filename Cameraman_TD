@@ -2,6 +2,16 @@ if not game:IsLoaded() then game.Loaded:Wait() end
 do
     local P = game:GetService("Players")
     while not P.LocalPlayer do task.wait() end
+    local lp = P.LocalPlayer
+    local started = os.clock()
+    local function ready()
+        local char = lp.Character
+        return char ~= nil and char:FindFirstChild("HumanoidRootPart") ~= nil and lp:FindFirstChild("PlayerGui") ~= nil
+    end
+    if not ready() then
+        while not ready() and os.clock() - started < 30 do task.wait() end
+        task.wait(4)
+    end
 end
 local __ok, __err = xpcall(function()
 local DiamondUI = (function()
@@ -600,9 +610,6 @@ local DiamondUI = (function()
                 Default = "RightShift", NoUI = true, Text = "Menu keybind",
             })
             Library.ToggleKeybind = Library.Options.MenuKeybind
-        end)
-        pcall(function()
-            menu:AddButton("Unload", function() Library:Unload() end)
         end)
         local ok, err = pcall(function()
             ThemeManager:SetLibrary(Library)
@@ -4420,6 +4427,10 @@ tgAutoExec = setSec:AddToggle({
             end
         end
     end,
+})
+setSec:AddButton({
+    Name = "Unload", Style = "Danger",
+    Callback = function() UI.Library:Unload() end,
 })
 Win:SetLoadOrder({"macro", "playMacro"})
 local function init()
