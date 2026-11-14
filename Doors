@@ -1,3 +1,5 @@
+-- The lobby has no run to hook into; Auto Execute / the loader start the hub again after the teleport into a run.
+if game.PlaceId == 6516141723 then return end
 if shared.DiamondHubDoors then return end
 shared.DiamondHubDoors = true
 if not game:IsLoaded() then game.Loaded:Wait() end
@@ -50,6 +52,83 @@ local DiamondUI = (function()
     Tab.__index = Tab
     local Section = {}
     Section.__index = Section
+
+    -- Auto Execute: runs the multi-loader again after teleports and rejoins. It uses the folder the loader caches Hub.lua into.
+    local AE_FOLDER = "DiamondHub_Doors"
+    local AE_GAMEID = 2440500124
+    local AE_LOADER = "https://raw.githubusercontent.com/ricelp8-coder/diamondHub/main/script"
+    local AE_STUB = ([[
+if not game:IsLoaded() then game.Loaded:Wait() end
+if game.GameId ~= %d then return end
+local ok, flag = pcall(readfile, "%s/AutoExecute.txt")
+if not ok or flag ~= "1" then return end
+local function run(source)
+	local fn, err = loadstring(source, "DiamondHubRelease")
+	if fn then fn() else warn(err) end
+end
+local fetched, source = pcall(function() return game:HttpGet("%s") end)
+if fetched and type(source) == "string" and #source > 0 then return run(source) end
+local cached, hub = pcall(readfile, "%s/Hub.lua")
+if cached and type(hub) == "string" then run(hub) end
+]]):format(AE_GAMEID, AE_FOLDER, AE_LOADER, AE_FOLDER)
+    local AE_DIRS = {"autoexec", "autoexecute", "Autoexec", "Autoexecute", "AutoExec", "AutoExecute"}
+    local aeQueued = false
+    local function aeSupported()
+        return type(writefile) == "function" and type(readfile) == "function" and type(isfile) == "function"
+            and type(isfolder) == "function" and type(makefolder) == "function"
+    end
+    function Lib.SetAutoExecute(enabled)
+        enabled = enabled and true or false
+        if not aeSupported() then
+            if enabled then
+                Lib:Notify({Title = "Auto Execute", Content = "Your executor has no file support.", Duration = 4, Type = "Warning"})
+            end
+            return false
+        end
+        local previous
+        pcall(function() previous = readfile(AE_FOLDER .. "/AutoExecute.txt") end)
+        pcall(function()
+            if not isfolder(AE_FOLDER) then makefolder(AE_FOLDER) end
+            writefile(AE_FOLDER .. "/AutoExecute.txt", enabled and "1" or "0")
+        end)
+        local placed = false
+        local anyDir = false
+        for _, dir in ipairs(AE_DIRS) do
+            local exists = false
+            pcall(function() exists = isfolder(dir) end)
+            if exists then
+                anyDir = true
+                if enabled then
+                    if pcall(writefile, dir .. "/DiamondHub_Doors.lua", AE_STUB) then placed = true end
+                else
+                    pcall(function()
+                        if isfile(dir .. "/DiamondHub_Doors.lua") and type(delfile) == "function" then
+                            delfile(dir .. "/DiamondHub_Doors.lua")
+                        end
+                    end)
+                end
+            end
+        end
+        if enabled and not anyDir then
+            pcall(function()
+                makefolder("autoexec")
+                writefile("autoexec/DiamondHub_Doors.lua", AE_STUB)
+                placed = true
+            end)
+        end
+        local queue = queue_on_teleport or queueonteleport or (syn and syn.queue_on_teleport)
+        if enabled and queue and not aeQueued then
+            aeQueued = pcall(queue, AE_STUB)
+        end
+        if previous ~= (enabled and "1" or "0") then
+            Lib:Notify({
+                Title = "Auto Execute",
+                Content = enabled and "Enabled. Diamond Hub will start itself after teleports and rejoins." or "Disabled.",
+                Duration = 4,
+            })
+        end
+        return true
+    end
 
     local function safe(cb, ...)
         if type(cb) ~= "function" then return end
@@ -612,6 +691,20 @@ local DiamondUI = (function()
                 Default = "RightShift", NoUI = true, Text = "Menu keybind",
             })
             Library.ToggleKeybind = Library.Options.MenuKeybind
+        end)
+        pcall(function()
+            menu:AddDivider()
+            menu:AddToggle("DiamondAutoExecute", {
+                Text = "Auto Execute", Default = false,
+                Tooltip = "Starts Diamond Hub by itself after teleports and when you rejoin Doors. Needs file support.",
+                Callback = function(v) Lib.SetAutoExecute(v) end,
+            })
+            win.Flags["autoexecute"] = {
+                Get = function() return Library.Toggles.DiamondAutoExecute.Value end,
+                Set = function(_, v)
+                    pcall(function() Library.Toggles.DiamondAutoExecute:SetValue(v and true or false) end)
+                end,
+            }
         end)
         pcall(function()
             menu:AddButton("Unload", function() Library:Unload() end)
@@ -2027,7 +2120,9 @@ Functions.Caption = function(Text, PlaySound)
 end
 
 Functions.GetHasteTime = function()
-	local TimeRemaining = FloorReplicated.DigitalTimer.Value
+	local Timer = FloorReplicated:FindFirstChild("DigitalTimer")
+	if not Timer then return "--:--" end
+	local TimeRemaining = Timer.Value
 	local Minutes = math.floor(TimeRemaining / 60)
 	local Seconds = TimeRemaining - (Minutes * 60)
 	local MinutesText = Minutes < 10 and ("0" .. tostring(Minutes)) or tostring(Minutes)
@@ -2641,6 +2736,16 @@ Toggles.FlyToggle:AddKeyPicker("FlyKeybind", {
 Groupboxes.General_Character:AddSlider("FlySpeed", {
 	Text = "Fly Speed", Min = 0, Max = 115, Default = 20, Rounding = 0, Compact = true
 })
+Groupboxes.General_Character:AddToggle("FreeCamToggle", {
+	Text = "FreeCam", Default = false,
+	Tooltip = "Detaches the camera so you can fly around the map. Your character stays where it is."
+})
+Toggles.FreeCamToggle:AddKeyPicker("FreeCamKeybind", {
+	Text = "FreeCam", Default = "None", Mode = "Toggle", SyncToggleState = true
+})
+Groupboxes.General_Character:AddSlider("FreeCamSpeed", {
+	Text = "FreeCam Speed", Min = 5, Max = 250, Default = 45, Rounding = 0, Compact = true
+})
 Groupboxes.General_Character:AddDivider()
 Groupboxes.General_Character:AddToggle("NoclipToggle", {
 	Text = "Noclip", Default = false, Tooltip = "Turns off collisions so you can walk through walls and props."
@@ -2692,6 +2797,236 @@ Toggles.EnableCharacterSlide:OnChanged(function(Value)
 		Character:SetAttribute("CanSlide", Value and true or OldSlide)
 	end
 end)
+
+-- FreeCam: camera-only flight. The character stays where it is; joystick + UP/DOWN buttons on screen,
+-- WASD + Space / Ctrl (Shift = faster) on keyboard, mouse (hold right button or locked) / touch drag to look.
+Globals.FreeCamActive = false
+do
+	local UIS = Services.UserInputService
+	local CAS = Services.ContextActionService
+	local GuiService = Services.GuiService
+	local NAVY, ACCENT, OUTLINE, TEXT = Color3.fromHex("0d1228"), Color3.fromHex("3d6bff"), Color3.fromHex("1b2554"), Color3.fromHex("eef2ff")
+	local STICK_RADIUS = 38
+
+	local FreeCam = {
+		Pos = Vector3.zero, Yaw = 0, Pitch = 0, Stick = Vector2.zero,
+		Up = false, Down = false,
+		StickInput = nil, LookInput = nil, UpInput = nil, DownInput = nil,
+		OldType = nil, Controls = nil,
+	}
+
+	local Gui = Instance.new("ScreenGui")
+	Gui.Name = DHub.ESPLibrary:GenerateRandomString()
+	Gui.ResetOnSpawn = false
+	Gui.IgnoreGuiInset = true
+	Gui.DisplayOrder = 32766
+	Gui.Enabled = false
+	Gui.Parent = GetHiddenContainer()
+
+	local function Round(Object, Radius)
+		local Corner = Instance.new("UICorner")
+		Corner.CornerRadius = Radius or UDim.new(1, 0)
+		Corner.Parent = Object
+	end
+	local function Stroke(Object, Color, Thickness)
+		local Line = Instance.new("UIStroke")
+		Line.Color = Color
+		Line.Thickness = Thickness or 2
+		Line.Parent = Object
+	end
+
+	local Base = Instance.new("Frame")
+	Base.Name = "Joystick"
+	Base.AnchorPoint = Vector2.new(0, 1)
+	Base.Position = UDim2.new(0, 36, 1, -36)
+	Base.Size = UDim2.fromOffset(130, 130)
+	Base.BackgroundColor3 = NAVY
+	Base.BackgroundTransparency = 0.25
+	Base.Parent = Gui
+	Round(Base)
+	Stroke(Base, OUTLINE, 3)
+
+	local Knob = Instance.new("Frame")
+	Knob.AnchorPoint = Vector2.new(0.5, 0.5)
+	Knob.Position = UDim2.fromScale(0.5, 0.5)
+	Knob.Size = UDim2.fromOffset(54, 54)
+	Knob.BackgroundColor3 = ACCENT
+	Knob.Parent = Base
+	Round(Knob)
+	Stroke(Knob, TEXT, 1.5)
+
+	local function MakeButton(Name, Text, Offset)
+		local Button = Instance.new("TextButton")
+		Button.Name = Name
+		Button.AnchorPoint = Vector2.new(1, 1)
+		Button.Position = UDim2.new(1, -36, 1, Offset)
+		Button.Size = UDim2.fromOffset(96, 56)
+		Button.BackgroundColor3 = NAVY
+		Button.BackgroundTransparency = 0.25
+		Button.AutoButtonColor = false
+		Button.Text = Text
+		Button.TextColor3 = TEXT
+		Button.Font = Enum.Font.GothamBold
+		Button.TextSize = 20
+		Button.Parent = Gui
+		Round(Button, UDim.new(0, 12))
+		Stroke(Button, OUTLINE, 2)
+		return Button
+	end
+	local UpButton = MakeButton("Up", "UP", -108)
+	local DownButton = MakeButton("Down", "DOWN", -36)
+
+	local function ScreenPosition(Input)
+		local Inset = GuiService:GetGuiInset()
+		return Vector2.new(Input.Position.X, Input.Position.Y) + Inset
+	end
+	local function UpdateStick(Input)
+		local Center = Base.AbsolutePosition + Base.AbsoluteSize / 2
+		local Offset = (ScreenPosition(Input) - Center) / STICK_RADIUS
+		if Offset.Magnitude > 1 then Offset = Offset.Unit end
+		FreeCam.Stick = Offset
+		Knob.Position = UDim2.new(0.5, Offset.X * STICK_RADIUS, 0.5, Offset.Y * STICK_RADIUS)
+	end
+	local function ResetStick()
+		FreeCam.StickInput = nil
+		FreeCam.Stick = Vector2.zero
+		Knob.Position = UDim2.fromScale(0.5, 0.5)
+	end
+	local function IsPress(Input)
+		return Input.UserInputType == Enum.UserInputType.Touch or Input.UserInputType == Enum.UserInputType.MouseButton1
+	end
+
+	Base.InputBegan:Connect(function(Input)
+		if FreeCam.StickInput or not IsPress(Input) then return end
+		FreeCam.StickInput = Input
+		UpdateStick(Input)
+	end)
+	UpButton.InputBegan:Connect(function(Input)
+		if IsPress(Input) then FreeCam.UpInput = Input FreeCam.Up = true UpButton.BackgroundColor3 = ACCENT end
+	end)
+	DownButton.InputBegan:Connect(function(Input)
+		if IsPress(Input) then FreeCam.DownInput = Input FreeCam.Down = true DownButton.BackgroundColor3 = ACCENT end
+	end)
+
+	local function Look(Delta)
+		FreeCam.Yaw -= math.rad(Delta.X * 0.25)
+		FreeCam.Pitch = math.clamp(FreeCam.Pitch - math.rad(Delta.Y * 0.25), math.rad(-85), math.rad(85))
+	end
+
+	Connections.FreeCamInputBegan = UIS.InputBegan:Connect(function(Input, Processed)
+		if not Globals.FreeCamActive or Processed then return end
+		if Input.UserInputType == Enum.UserInputType.Touch and not FreeCam.LookInput then
+			FreeCam.LookInput = Input
+		end
+	end)
+	Connections.FreeCamInputChanged = UIS.InputChanged:Connect(function(Input)
+		if not Globals.FreeCamActive then return end
+		if FreeCam.StickInput then
+			if Input == FreeCam.StickInput
+				or (FreeCam.StickInput.UserInputType == Enum.UserInputType.MouseButton1 and Input.UserInputType == Enum.UserInputType.MouseMovement) then
+				UpdateStick(Input)
+			end
+		end
+		if Input == FreeCam.LookInput then
+			Look(Input.Delta)
+		elseif Input.UserInputType == Enum.UserInputType.MouseMovement
+			and (UIS.MouseBehavior == Enum.MouseBehavior.LockCenter or UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)) then
+			Look(Input.Delta)
+		end
+	end)
+	Connections.FreeCamInputEnded = UIS.InputEnded:Connect(function(Input)
+		if Input == FreeCam.StickInput or (FreeCam.StickInput and FreeCam.StickInput.UserInputType == Enum.UserInputType.MouseButton1 and Input.UserInputType == Enum.UserInputType.MouseButton1) then
+			ResetStick()
+		end
+		if Input == FreeCam.LookInput then FreeCam.LookInput = nil end
+		if Input == FreeCam.UpInput then FreeCam.UpInput = nil FreeCam.Up = false UpButton.BackgroundColor3 = NAVY end
+		if Input == FreeCam.DownInput then FreeCam.DownInput = nil FreeCam.Down = false DownButton.BackgroundColor3 = NAVY end
+	end)
+
+	local function Step(DeltaTime)
+		local Cam = Services.Workspace.CurrentCamera
+		if not Cam then return end
+		local Typing = Globals.IsTyping
+		local function Key(Code) return not Typing and UIS:IsKeyDown(Code) end
+		local Forward = -FreeCam.Stick.Y + (Key(Enum.KeyCode.W) and 1 or 0) - (Key(Enum.KeyCode.S) and 1 or 0)
+		local Right = FreeCam.Stick.X + (Key(Enum.KeyCode.D) and 1 or 0) - (Key(Enum.KeyCode.A) and 1 or 0)
+		local Vertical = ((FreeCam.Up or Key(Enum.KeyCode.Space)) and 1 or 0) - ((FreeCam.Down or Key(Enum.KeyCode.LeftControl)) and 1 or 0)
+		local Rotation = CFrame.Angles(0, FreeCam.Yaw, 0) * CFrame.Angles(FreeCam.Pitch, 0, 0)
+		local Direction = Rotation.LookVector * Forward + Rotation.RightVector * Right
+		if Direction.Magnitude > 1 then Direction = Direction.Unit end
+		local Speed = Options.FreeCamSpeed.Value * (Key(Enum.KeyCode.LeftShift) and 2.5 or 1)
+		FreeCam.Pos += (Direction + Vector3.yAxis * Vertical) * Speed * DeltaTime
+		Cam.CameraType = Enum.CameraType.Scriptable
+		Cam.CFrame = CFrame.new(FreeCam.Pos) * Rotation
+	end
+
+	local function Disable()
+		if not Globals.FreeCamActive then return end
+		Globals.FreeCamActive = false
+		pcall(function() Services.RunService:UnbindFromRenderStep("DiamondFreeCam") end)
+		pcall(function() CAS:UnbindAction("DiamondFreeCamSink") end)
+		if FreeCam.Controls then pcall(function() FreeCam.Controls:Enable() end) FreeCam.Controls = nil end
+		ResetStick()
+		FreeCam.Up, FreeCam.Down, FreeCam.UpInput, FreeCam.DownInput, FreeCam.LookInput = false, false, nil, nil, nil
+		UpButton.BackgroundColor3 = NAVY
+		DownButton.BackgroundColor3 = NAVY
+		Gui.Enabled = false
+		local Cam = Services.Workspace.CurrentCamera
+		if Cam then Cam.CameraType = FreeCam.OldType or Enum.CameraType.Custom end
+	end
+
+	local function Enable()
+		if Globals.FreeCamActive then return end
+		local Cam = Services.Workspace.CurrentCamera
+		if not Cam then return end
+		Globals.FreeCamActive = true
+		FreeCam.OldType = Cam.CameraType
+		FreeCam.Pitch, FreeCam.Yaw = Cam.CFrame:ToOrientation()
+		FreeCam.Pos = Cam.CFrame.Position
+		-- the character must not move while the camera flies
+		pcall(function()
+			FreeCam.Controls = require(LocalPlayer.PlayerScripts:WaitForChild("PlayerModule", 2)):GetControls()
+			FreeCam.Controls:Disable()
+		end)
+		CAS:BindActionAtPriority("DiamondFreeCamSink", function() return Enum.ContextActionResult.Sink end, false, 3000,
+			Enum.KeyCode.W, Enum.KeyCode.A, Enum.KeyCode.S, Enum.KeyCode.D, Enum.KeyCode.Space)
+		Gui.Enabled = true
+		Services.RunService:BindToRenderStep("DiamondFreeCam", 2000, Step)
+	end
+
+	Toggles.FreeCamToggle:OnChanged(function(Value)
+		if Value then Enable() else Disable() end
+	end)
+	Library:OnUnload(function()
+		Disable()
+		pcall(function() Gui:Destroy() end)
+	end)
+end
+
+-- God Mode lowers the character under the floor; keep the camera where it was.
+do
+	local Offset = Vector3.new(0, 2.346, 0)
+	local Applied = nil
+	Services.RunService:BindToRenderStep("DiamondGodCamRevert", 1, function()
+		local Cam = Services.Workspace.CurrentCamera
+		if Applied and Cam and Cam.CFrame == Applied then
+			Cam.CFrame = Applied - Offset
+		end
+		Applied = nil
+	end)
+	Services.RunService:BindToRenderStep("DiamondGodCam", 2001, function()
+		local Cam = Services.Workspace.CurrentCamera
+		if not Cam or Globals.FreeCamActive or not Toggles.PositionSpoof.Value then return end
+		if Floor == "Fools" or Floor == "OldHotel" or not Character or not Humanoid then return end
+		if Humanoid.HipHeight > 1 or Character:GetAttribute("Hiding") == true then return end
+		Applied = Cam.CFrame + Offset
+		Cam.CFrame = Applied
+	end)
+	Library:OnUnload(function()
+		pcall(function() Services.RunService:UnbindFromRenderStep("DiamondGodCamRevert") end)
+		pcall(function() Services.RunService:UnbindFromRenderStep("DiamondGodCam") end)
+	end)
+end
 
 Groupboxes.General_Self = Tabs.Main:AddLeftGroupbox("Self")
 Groupboxes.General_Self:AddToggle("DoorReachToggle", {
@@ -3476,8 +3811,6 @@ Toggles.ForgetMeNotSolver:OnChanged(function(Value)
 end)
 
 Toggles.BypassWater:OnChanged(function(Value)
-	Functions.Notify({ Title = "God Mode will break this!" })
-
 	if WaterBypassConnection then
 		WaterBypassConnection:Disconnect()
 		WaterBypassConnection = nil
@@ -3529,7 +3862,6 @@ Toggles.BypassWater:OnChanged(function(Value)
 
 		if WaterBypassPart.Size.Y > 3 then
 			WaterBypassPart:Destroy()
-			Functions.Notify({ Title = "Water Bypass removed: Softlock." })
 			return
 		end
 
@@ -4414,7 +4746,7 @@ Groupboxes.Visuals_Entities:AddToggle("NotifyItemsShowDistance",    { Text = "Sh
 Groupboxes.Visuals_Entities:AddDivider()
 Groupboxes.Visuals_Entities:AddToggle("NotifyLibraryCode", { Text = "Notify Library Code", Default = false, Tooltip = "Shows the padlock code as soon as enough hints are collected." })
 Groupboxes.Visuals_Entities:AddToggle("NotifyOxygen",      { Text = "Notify Oxygen Level", Default = false, Tooltip = "Shows your oxygen level as a caption whenever it changes." })
-Groupboxes.Visuals_Entities:AddToggle("NotifyHasteTime",   { Text = "Notify Haste Time",   Default = false, Tooltip = "Shows the time left before Haste spawns." })
+Groupboxes.Visuals_Entities:AddToggle("NotifyHasteTime",   { Text = "Haste Timer",   Default = false, Tooltip = "Shows the time left before Haste spawns." })
 
 -- Entity notifications are fixed: Diamond style, sound on (volume 3), chat off.
 Globals.EntityChat = false
@@ -6691,9 +7023,71 @@ Connections.FloorReplicatedHandler = FloorReplicated.DescendantAdded:Connect(fun
 	end
 end)
 
+-- Haste timer: framed on-screen readout (own font and colours) instead of the game's caption text.
+do
+	local Frame = Instance.new("Frame")
+	Frame.Name = "HasteTimer"
+	Frame.AnchorPoint = Vector2.new(0.5, 0)
+	Frame.Position = UDim2.new(0.5, 0, 0, 62)
+	Frame.Size = UDim2.fromOffset(168, 54)
+	Frame.BackgroundColor3 = Color3.fromHex("0d1228")
+	Frame.BackgroundTransparency = 0.12
+	Frame.Visible = false
+	Frame.Parent = Container
+	local Corner = Instance.new("UICorner")
+	Corner.CornerRadius = UDim.new(0, 10)
+	Corner.Parent = Frame
+	local Line = Instance.new("UIStroke")
+	Line.Color = Color3.fromHex("3d6bff")
+	Line.Thickness = 1.5
+	Line.Parent = Frame
+
+	local Title = Instance.new("TextLabel")
+	Title.BackgroundTransparency = 1
+	Title.Position = UDim2.fromOffset(0, 5)
+	Title.Size = UDim2.new(1, 0, 0, 14)
+	Title.Font = Enum.Font.GothamBold
+	Title.Text = "HASTE"
+	Title.TextColor3 = Color3.fromHex("3d6bff")
+	Title.TextSize = 11
+	Title.Parent = Frame
+
+	local Time = Instance.new("TextLabel")
+	Time.BackgroundTransparency = 1
+	Time.Position = UDim2.fromOffset(0, 19)
+	Time.Size = UDim2.new(1, 0, 0, 30)
+	Time.Font = Enum.Font.Michroma
+	Time.Text = "--:--"
+	Time.TextColor3 = Color3.fromHex("eef2ff")
+	Time.TextSize = 22
+	Time.Parent = Frame
+
+	local Bar = Instance.new("Frame")
+	Bar.AnchorPoint = Vector2.new(0.5, 1)
+	Bar.Position = UDim2.new(0.5, 0, 1, -4)
+	Bar.Size = UDim2.new(1, -20, 0, 2)
+	Bar.BackgroundColor3 = Color3.fromHex("3d6bff")
+	Bar.BorderSizePixel = 0
+	Bar.Parent = Frame
+
+	Functions.UpdateHasteTimer = function()
+		local Visible = Toggles.NotifyHasteTime.Value
+		Frame.Visible = Visible
+		if not Visible then return end
+		Time.Text = Functions.GetHasteTime()
+		local Timer = FloorReplicated:FindFirstChild("DigitalTimer")
+		local Urgent = Timer and Timer.Value <= 30
+		Time.TextColor3 = Urgent and Color3.fromHex("ff4650") or Color3.fromHex("eef2ff")
+		Bar.BackgroundColor3 = Urgent and Color3.fromHex("ff4650") or Color3.fromHex("3d6bff")
+		Line.Color = Bar.BackgroundColor3
+	end
+	Toggles.NotifyHasteTime:OnChanged(function() Functions.UpdateHasteTimer() end)
+	Library:OnUnload(function() pcall(function() Frame:Destroy() end) end)
+end
+
 if FloorReplicated:FindFirstChild("DigitalTimer") then
 	Connections.HasteTimerConnection = FloorReplicated.DigitalTimer:GetPropertyChangedSignal("Value"):Connect(function()
-		if Toggles.NotifyHasteTime.Value then Functions.Caption(Functions.GetHasteTime(), true) end
+		Functions.UpdateHasteTimer()
 	end)
 end
 
