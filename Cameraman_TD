@@ -76,6 +76,12 @@ local DiamondUI = (function()
         for i, k in ipairs(keys) do o[k] = args[i] end
         return o
     end
+    function Lib.SetAutoExecuteToggle(v)
+        Lib.AESilent = true
+        pcall(function() Library.Toggles.DiamondAutoExecute:SetValue(v and true or false) end)
+        Lib.AESilent = false
+    end
+
     function Lib.Rich(text, color)
         return string.format('<font color="rgb(%d,%d,%d)">%s</font>',
             math.floor(color.R * 255 + 0.5), math.floor(color.G * 255 + 0.5), math.floor(color.B * 255 + 0.5), tostring(text))
@@ -610,6 +616,18 @@ local DiamondUI = (function()
                 Default = "RightShift", NoUI = true, Text = "Menu keybind",
             })
             Library.ToggleKeybind = Library.Options.MenuKeybind
+        end)
+        pcall(function()
+            local scriptBox = tab.Obs:AddGroupbox({Side = "Right", Name = "Script", IconName = "power"})
+            Lib.AEToggle = scriptBox:AddToggle("DiamondAutoExecute", {
+                Text = "Auto Execute", Default = false,
+                Tooltip = "Reruns the script after every teleport",
+                Callback = function(v)
+                    if Lib.AESilent then return end
+                    if Lib.OnAutoExecute then Lib.OnAutoExecute(v) end
+                end,
+            })
+            scriptBox:AddButton("Unload", function() Library:Unload() end)
         end)
         local ok, err = pcall(function()
             ThemeManager:SetLibrary(Library)
@@ -4408,30 +4426,20 @@ miscSec:AddToggle({
     Name = "Black Screen", Flag = "blackScreen", Tooltip = "Turns off 3D rendering and covers the screen with black to cut GPU load and lag. The menu stays usable",
     Callback = function(v) MISC.blackScreen(v) end,
 })
-local tgAutoExec
-local settingsTab = Win:AddSettingsTab("Settings")
-local setSec = settingsTab:AddSection(nil)
-tgAutoExec = setSec:AddToggle({
-    Name = "Auto Execute", Flag = "autoExecute", NoSave = true,
-    Tooltip = "Reruns the script after every teleport (Play Again, lobby and match)",
-    Callback = function(v)
-        cfg.autoExecute = v
-        AE.set(v)
-        if v then
-            local ok, why = AE.queue()
-            if not ok then
-                cfg.autoExecute = false
-                AE.set(false)
-                if tgAutoExec then tgAutoExec:Set(false, true) end
-                flash("Auto Execute: " .. why, "Error")
-            end
+Win:AddSettingsTab("Settings")
+UI.OnAutoExecute = function(v)
+    cfg.autoExecute = v
+    AE.set(v)
+    if v then
+        local ok, why = AE.queue()
+        if not ok then
+            cfg.autoExecute = false
+            AE.set(false)
+            UI.SetAutoExecuteToggle(false)
+            flash("Auto Execute: " .. why, "Error")
         end
-    end,
-})
-setSec:AddButton({
-    Name = "Unload", Style = "Danger",
-    Callback = function() UI.Library:Unload() end,
-})
+    end
+end
 Win:SetLoadOrder({"macro", "playMacro"})
 local function init()
     task.spawn(loadTowerConfig)
@@ -4744,7 +4752,7 @@ local restartedByQueue = genv.cm_ae
 genv.cm_ae = nil
 if AE.get() then
     cfg.autoExecute = true
-    if tgAutoExec then tgAutoExec:Set(true, true) end
+    UI.SetAutoExecuteToggle(true)
     local ok, why = AE.queue()
     local lastLog = AE.takeLog()
     if restartedByQueue then
@@ -4754,7 +4762,7 @@ if AE.get() then
     if lastLog then flash("Auto Execute log: " .. lastLog, lastLog:find("error") and "Error" or "Success") end
 else
     cfg.autoExecute = false
-    if tgAutoExec then tgAutoExec:Set(false, true) end
+    UI.SetAutoExecuteToggle(false)
 end
 UI:Notify({
     Title = "Diamond Hub", Content = "Ready. RightShift hides the menu.", Duration = 4, Type = "Success",
