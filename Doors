@@ -1,4 +1,3 @@
--- The lobby has no run to hook into; Auto Execute / the loader start the hub again after the teleport into a run.
 if game.PlaceId == 6516141723 then return end
 if shared.DiamondHubDoors then return end
 shared.DiamondHubDoors = true
@@ -14,7 +13,6 @@ local DiamondUI = (function()
     local genv = (getgenv and getgenv()) or _G
     local REPO = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/"
 
-    -- Remove the previous run (old Obsidian window and the legacy DiamondUI guis).
     if genv.__obsidian_lib then
         pcall(function() genv.__obsidian_lib:Unload() end)
         genv.__obsidian_lib = nil
@@ -53,82 +51,47 @@ local DiamondUI = (function()
     local Section = {}
     Section.__index = Section
 
-    -- Auto Execute: runs the multi-loader again after teleports and rejoins. It uses the folder the loader caches Hub.lua into.
-    local AE_FOLDER = "DiamondHub_Doors"
-    local AE_GAMEID = 2440500124
-    local AE_LOADER = "https://raw.githubusercontent.com/ricelp8-coder/diamondHub/main/script"
-    local AE_STUB = ([[
-if not game:IsLoaded() then game.Loaded:Wait() end
-if game.GameId ~= %d then return end
-local ok, flag = pcall(readfile, "%s/AutoExecute.txt")
-if not ok or flag ~= "1" then return end
-local function run(source)
-	local fn, err = loadstring(source, "DiamondHubRelease")
-	if fn then fn() else warn(err) end
-end
-local fetched, source = pcall(function() return game:HttpGet("%s") end)
-if fetched and type(source) == "string" and #source > 0 then return run(source) end
-local cached, hub = pcall(readfile, "%s/Hub.lua")
-if cached and type(hub) == "string" then run(hub) end
-]]):format(AE_GAMEID, AE_FOLDER, AE_LOADER, AE_FOLDER)
-    local AE_DIRS = {"autoexec", "autoexecute", "Autoexec", "Autoexecute", "AutoExec", "AutoExecute"}
-    local aeQueued = false
-    local function aeSupported()
-        return type(writefile) == "function" and type(readfile) == "function" and type(isfile) == "function"
-            and type(isfolder) == "function" and type(makefolder) == "function"
+    local AE_SCRIPT_URL = "https://raw.githubusercontent.com/ricelp8-coder/diamondHub/main/script"
+    local AE = {queued = false, file = "DiamondHub_Doors/_autoexec.txt"}
+    AE.hasFS = type(writefile) == "function" and type(readfile) == "function" and type(isfile) == "function"
+    function AE.get()
+        if not AE.hasFS then return genv.dh_ae_flag == true end
+        local ok, v = pcall(function() return isfile(AE.file) and readfile(AE.file) or "" end)
+        return ok and v == "1"
     end
-    function Lib.SetAutoExecute(enabled)
-        enabled = enabled and true or false
-        if not aeSupported() then
-            if enabled then
-                Lib:Notify({Title = "Auto Execute", Content = "Your executor has no file support.", Duration = 4, Type = "Warning"})
-            end
-            return false
-        end
-        local previous
-        pcall(function() previous = readfile(AE_FOLDER .. "/AutoExecute.txt") end)
+    function AE.set(on)
+        genv.dh_ae_flag = on and true or false
+        if not AE.hasFS then return end
         pcall(function()
-            if not isfolder(AE_FOLDER) then makefolder(AE_FOLDER) end
-            writefile(AE_FOLDER .. "/AutoExecute.txt", enabled and "1" or "0")
-        end)
-        local placed = false
-        local anyDir = false
-        for _, dir in ipairs(AE_DIRS) do
-            local exists = false
-            pcall(function() exists = isfolder(dir) end)
-            if exists then
-                anyDir = true
-                if enabled then
-                    if pcall(writefile, dir .. "/DiamondHub_Doors.lua", AE_STUB) then placed = true end
-                else
-                    pcall(function()
-                        if isfile(dir .. "/DiamondHub_Doors.lua") and type(delfile) == "function" then
-                            delfile(dir .. "/DiamondHub_Doors.lua")
-                        end
-                    end)
-                end
+            if type(isfolder) == "function" and type(makefolder) == "function" and not isfolder("DiamondHub_Doors") then
+                makefolder("DiamondHub_Doors")
             end
-        end
-        if enabled and not anyDir then
-            pcall(function()
-                makefolder("autoexec")
-                writefile("autoexec/DiamondHub_Doors.lua", AE_STUB)
-                placed = true
-            end)
-        end
-        local queue = queue_on_teleport or queueonteleport or (syn and syn.queue_on_teleport)
-        if enabled and queue and not aeQueued then
-            aeQueued = pcall(queue, AE_STUB)
-        end
-        if previous ~= (enabled and "1" or "0") then
-            Lib:Notify({
-                Title = "Auto Execute",
-                Content = enabled and "Enabled. Diamond Hub will start itself after teleports and rejoins." or "Disabled.",
-                Duration = 4,
-            })
-        end
+            writefile(AE.file, on and "1" or "0")
+        end)
+    end
+    function AE.code()
+        return ([[
+local on = getgenv().dh_ae_flag == true
+if type(isfile) == "function" and type(readfile) == "function" then
+    local ok, v = pcall(function() if isfile(%q) then return readfile(%q) end end)
+    if ok and v ~= nil then on = (v == "1") end
+end
+if not on then return end
+if not game:IsLoaded() then game.Loaded:Wait() end
+getgenv().dh_ae = true
+loadstring(game:HttpGet(%q))()]]):format(AE.file, AE.file, AE_SCRIPT_URL)
+    end
+    function AE.queue()
+        local q = (type(queue_on_teleport) == "function" and queue_on_teleport)
+            or (type(syn) == "table" and type(syn.queue_on_teleport) == "function" and syn.queue_on_teleport)
+            or (type(fluxus) == "table" and type(fluxus.queue_on_teleport) == "function" and fluxus.queue_on_teleport)
+        if not q then return false, "no queue_on_teleport in this executor" end
+        if AE.queued then return true end
+        if not pcall(q, AE.code()) then return false, "queue_on_teleport failed" end
+        AE.queued = true
         return true
     end
+    Lib.AE = AE
 
     local function safe(cb, ...)
         if type(cb) ~= "function" then return end
@@ -140,7 +103,6 @@ if cached and type(hub) == "string" then run(hub) end
         return s:sub(1, 24)
     end
     Lib.Sanitize = sanitize
-    -- Elements accept both a single options table and positional arguments.
     local function P(keys, ...)
         local first = ...
         if type(first) == "table" then return first end
@@ -321,7 +283,6 @@ if cached and type(hub) == "string" then run(hub) end
         return obj
     end
 
-    -- Keeps long names from running under the toggle switch: reserve its width and truncate with "...".
     local function fitToggleLabel(el)
         pcall(function()
             local holder = el.Holder
@@ -339,7 +300,6 @@ if cached and type(hub) == "string" then run(hub) end
         end)
     end
 
-    -- Runs a programmatic change; muted changes do not reach the user's callback.
     local function drive(ctl, silent, setter)
         ctl.fired = false
         if silent then ctl.muted = ctl.muted + 1 end
@@ -504,8 +464,6 @@ if cached and type(hub) == "string" then run(hub) end
             end,
         })
         local obj = {NoSave = o.NoSave}
-  -- With Finished = true the callback only fires on Enter, so read what is typed right now:
-  -- otherwise typing a name and pressing Save would use the stale value.
   local box
   pcall(function()
   local holder = el.Holder or el.Textbox
@@ -694,17 +652,24 @@ if cached and type(hub) == "string" then run(hub) end
         end)
         pcall(function()
             menu:AddDivider()
-            menu:AddToggle("DiamondAutoExecute", {
+            Lib.AEToggle = menu:AddToggle("DiamondAutoExecute", {
                 Text = "Auto Execute", Default = false,
-                Tooltip = "Starts Diamond Hub by itself after teleports and when you rejoin Doors. Needs file support.",
-                Callback = function(v) Lib.SetAutoExecute(v) end,
-            })
-            win.Flags["autoexecute"] = {
-                Get = function() return Library.Toggles.DiamondAutoExecute.Value end,
-                Set = function(_, v)
-                    pcall(function() Library.Toggles.DiamondAutoExecute:SetValue(v and true or false) end)
+                Tooltip = "Reruns the script after every teleport (Play Again, lobby and next run)",
+                Callback = function(v)
+                    if Lib.AESilent then return end
+                    AE.set(v)
+                    if v then
+                        local ok, why = AE.queue()
+                        if not ok then
+                            AE.set(false)
+                            Lib.AESilent = true
+                            pcall(function() Library.Toggles.DiamondAutoExecute:SetValue(false) end)
+                            Lib.AESilent = false
+                            Lib:Notify({Title = "Auto Execute", Content = why, Duration = 4, Type = "Error"})
+                        end
+                    end
                 end,
-            }
+            })
         end)
         pcall(function()
             menu:AddButton("Unload", function() Library:Unload() end)
@@ -787,7 +752,6 @@ if cached and type(hub) == "string" then run(hub) end
         self.ConfigFolder = tostring(o.ConfigFolder or "DiamondHub")
         self.Flags, self.Tabs = {}, {}
         self._stateIO = stateIO(self.ConfigFolder)
-        -- Deep navy and neon blue, matching the reference art.
         local PALETTE = {
             BackgroundColor = "070a16", MainColor = "0d1228", AccentColor = "3d6bff",
             OutlineColor = "1b2554", FontColor = "eef2ff",
@@ -804,7 +768,6 @@ if cached and type(hub) == "string" then run(hub) end
             Size = UDim2.fromOffset(740, 500), Center = true, AutoShow = true,
         })
         self.Gui = Library.ScreenGui
-        -- Pin the title to the left edge with a small inset (no icon is used).
         pcall(function()
             for _, d in ipairs(Library.ScreenGui:GetDescendants()) do
                 if d:IsA("TextLabel") and d.Text == self.Title then
@@ -831,7 +794,6 @@ if cached and type(hub) == "string" then run(hub) end
 end)()
 local UI = DiamondUI
 local genv = (getgenv and getgenv()) or _G
--- Executor environment: exposes only the functions the executor really has.
 local function BuildEnvironment()
 	local genv = (getgenv and getgenv()) or _G
 	local root = (getfenv and getfenv(0)) or genv
@@ -863,7 +825,6 @@ local function BuildEnvironment()
 	})
 end
 
--- ESP library (highlights, labels, tracers, arrows).
 local function BuildESP()
 local Library = {
 	Font = Enum.Font.RobotoCondensed,
@@ -1568,7 +1529,6 @@ local Services = setmetatable({}, {
 
 
 
--- archives and stairwell locals
 local TimeShowerSourceLabel
 local TimeShowerToken = 0
 local TimeShowerConnection
@@ -1642,7 +1602,6 @@ Functions.CheckCompatability = function(Array)
 end
 
 
--- DontGroup
 local LocalPlayer = Services.Players.LocalPlayer
 
 
@@ -2605,8 +2564,6 @@ end
 
 local Window = DWin.Obs
 
--- Ghost UI: floor tabs that do not belong to the current floor are never drawn, but every Toggle / Option
--- they would create still exists (inactive, default value) so shared handlers never index nil.
 local function MakeGhost(Idx, Info, Kind)
 	Info = type(Info) == "table" and Info or {}
 	local Element = { Ghost = true, Type = Kind, Idx = Idx, Saved = nil }
@@ -2692,8 +2649,6 @@ local function MakeGhostTab()
 	return Tab
 end
 
--- Floor detection: ReplicatedStorage.GameData.Floor.Value (BaseFloors: Hotel, Mines, Rooms, Garden, Backdoor,
--- Archives, Stairwell, Ripple, ...). The floor tab is built for the floor we are actually in.
 local function FloorIs(Name)
 	return Floor == Name or string.find(string.lower(tostring(Floor)), string.lower(Name), 1, true) ~= nil
 end
@@ -2798,8 +2753,6 @@ Toggles.EnableCharacterSlide:OnChanged(function(Value)
 	end
 end)
 
--- FreeCam: camera-only flight. The character stays where it is; joystick + UP/DOWN buttons on screen,
--- WASD + Space / Ctrl (Shift = faster) on keyboard, mouse (hold right button or locked) / touch drag to look.
 Globals.FreeCamActive = false
 do
 	local UIS = Services.UserInputService
@@ -2983,7 +2936,6 @@ do
 		FreeCam.OldType = Cam.CameraType
 		FreeCam.Pitch, FreeCam.Yaw = Cam.CFrame:ToOrientation()
 		FreeCam.Pos = Cam.CFrame.Position
-		-- the character must not move while the camera flies
 		pcall(function()
 			FreeCam.Controls = require(LocalPlayer.PlayerScripts:WaitForChild("PlayerModule", 2)):GetControls()
 			FreeCam.Controls:Disable()
@@ -3003,7 +2955,6 @@ do
 	end)
 end
 
--- God Mode lowers the character under the floor; keep the camera where it was.
 do
 	local Offset = Vector3.new(0, 2.346, 0)
 	local Applied = nil
@@ -3168,7 +3119,6 @@ Groupboxes.Debug:AddButton({
 	Func = function()
 		if not Character then return end
 		local Pivot = Character:GetPivot()
-		-- Too lazy to loop this
 		Character:PivotTo(Pivot + Vector3.new(0, -120 - Pivot.Position.Y, 0))
 		Character:PivotTo(Pivot + Vector3.new(0, -120 - Pivot.Position.Y, 0))
 		Character:PivotTo(Pivot + Vector3.new(0, -120 - Pivot.Position.Y, 0))
@@ -3383,7 +3333,6 @@ end)
 
 
 
--- Archives
 
 Groupboxes.Archives_Misc = Tabs.Archives:AddRightGroupbox("Misc")
 Groupboxes.Archives_Misc:AddToggle("AntiRansom", { Text = "Anti Ransom", Default = false, Tooltip = "Ransom can no longer attack you." })
@@ -3498,7 +3447,6 @@ end
 Toggles.HonchoCorrectBoxESP:OnChanged(function(Value)
 	ClearHonchoESP()
 	if not Value then return end
-	-- DontGroup
 	local CurrentRooms = workspace:FindFirstChild("CurrentRooms")
 	if not CurrentRooms then return end
 
@@ -3825,7 +3773,6 @@ Toggles.BypassWater:OnChanged(function(Value)
 		table.clear(WaterParts)
 		return
 	end
-	-- DontGroup
 	local CurrentRooms = workspace.CurrentRooms
 
 	local function ProcessWaterBypassRoom(WaterBypassRoom)
@@ -4678,7 +4625,6 @@ Toggles.DisableEntityJumpscares:OnChanged(function(Value)
 	end
 end)
 
--- "All" entry for entity lists: ticking it selects every entity, unticking an entity drops it, unticking it clears the list.
 local function AllCallback(Key)
 	local WasAll, Busy = false, false
 	return function(Value)
@@ -4748,7 +4694,6 @@ Groupboxes.Visuals_Entities:AddToggle("NotifyLibraryCode", { Text = "Notify Libr
 Groupboxes.Visuals_Entities:AddToggle("NotifyOxygen",      { Text = "Notify Oxygen Level", Default = false, Tooltip = "Shows your oxygen level as a caption whenever it changes." })
 Groupboxes.Visuals_Entities:AddToggle("NotifyHasteTime",   { Text = "Haste Timer",   Default = false, Tooltip = "Shows the time left before Haste spawns." })
 
--- Entity notifications are fixed: Diamond style, sound on (volume 3), chat off.
 Globals.EntityChat = false
 Globals.EntityChatMessage = "spawned!"
 
@@ -4851,7 +4796,7 @@ Groupboxes.Visuals_ESP_Toggles:AddToggle("CurrencyESPToggle",   { Text = "Curren
 Groupboxes.Visuals_ESP_Toggles:AddToggle("LadderESPToggle",     { Text = "Ladders",      Default = false, Tooltip = "Marks ladders, which you need for the anticheat bypass." })
 Groupboxes.Visuals_ESP_Toggles:AddToggle("MiscESPToggle",       { Text = "Misc",         Default = false, Tooltip = "Marks other objects that can switch the anticheat off." })
 Groupboxes.Visuals_ESP_Toggles:AddDivider()
-Groupboxes.Visuals_ESP_Toggles:AddDropdown("EntityESPOptions",     { 
+Groupboxes.Visuals_ESP_Toggles:AddDropdown("EntityESPOptions",     {
 	Text = "Entity List",
 	Callback = AllCallback("EntityESPOptions"),
 	Values = { "All","Rush","Bash","Scribbles","Teller","DronesStampede","Creak","Noise","Noise_TV","Balls","Portrait","CreakHalloween","Weaveling","Ambush","Eyes","Dupe","Figure","Blitz","Lookman","Snare","Giggle","Gloombat Eggs","Grumble","A-60","A-120","Sally","Jeff the Killer","Groundskeeper","Mandrake Hole","Monument","Bramble","AR0xMBUSH","RNIUSHCG==" },
@@ -5224,7 +5169,6 @@ Connections.RoomsAutoWalkHandler = Services.RunService.Heartbeat:Connect(functio
 		RemotesFolder.CamLock:FireServer()
 		Character:SetAttribute("Hiding", false)
 	end
-	-- DontGroup
 	local CurrentRoom = CurrentRooms[tostring(LatestRoom.Value)]
 	if CurrentRoom:FindFirstChild("Door") then
 		CurrentRoom.Door.Door.CanCollide = false
@@ -5360,7 +5304,7 @@ if Functions.CheckCompatability({"hookmetamethod", "newcclosure", "getnamecallme
         if Property == "MoveDirection" and Self == Humanoid and Globals.RoomsAutoWalkActive and Toggles.RoomsAutoWalkSpoofFootsteps.Value and Floor == "Rooms" and not Character:GetAttribute("Hiding") then
             return RootPart.CFrame.LookVector
         end
-        
+
         return Real
     end))
 end
@@ -6598,7 +6542,7 @@ Connections.PromptAnimationFixer1 = Services.ProximityPromptService.PromptButton
 	if Prompt.Parent.Name == "SkullLock" and not Functions.HasItem("SkeletonKey", true) then return end
 	if Prompt.Parent.Name == "Lock1" and not Functions.HasItem("Lockpick", true) and not Functions.HasItem("Multitool", true) or Prompt.Parent.Name == "Lock2" and not Functions.HasItem("Lockpick", true) and not Functions.HasItem("Multitool", true) then return end
 	if Functions.HasItem("Shears", true) and IsLockPrompt and Prompt.Parent.Name ~= "CuttableVines" and Prompt.Parent.Name ~= "Chest_Vine" and Prompt.Parent.Name ~= "Cellar" then return end
-	
+
 	if Tool and table.find(AnimateToolNames, Tool.Name) and Globals.UseAnimation then
 		Globals.UseAnimationBreak:Stop()
 		Globals.UseAnimation:Stop()
@@ -6900,7 +6844,6 @@ Functions.TriggerPrompt = function(Prompt)
 	if Prompt.Parent.Name == "AlarmClock" and Functions.HasItem("AlarmClock") then return end
 	if Prompt.Parent.Name == "KeyObtainFake" or Prompt.Parent.Name == "TithingPlate" then return end
 	if Prompt.Parent.Name == "StarBottle" then return end
-    -- archives
 	if Prompt.parent.Name == "ArchivesStorageBox" then return end
 	if Prompt.Parent.Name == "Briefcase" then return end
 	if Prompt.Name == "SinkPrompt" or Prompt.Parent.Name == "Faucet" then return end
@@ -6915,7 +6858,6 @@ Functions.TriggerPrompt = function(Prompt)
     if Prompt.Parent.Name == "SeatPart" or Prompt.Name == "SeatPrompt" then return end
 
 
-	-- Stairwell
 	if Prompt.Parent.Parent.Parent.Parent.Name == "CandyVault" then return end
 	if Prompt.Parent.Name == "StairwellScrapper" then return end
 	if Prompt.Name == "PortraitDupePrompt" or Prompt.Parent.Name == "MirrorTool" then return end
@@ -7023,7 +6965,6 @@ Connections.FloorReplicatedHandler = FloorReplicated.DescendantAdded:Connect(fun
 	end
 end)
 
--- Haste timer: framed on-screen readout (own font and colours) instead of the game's caption text.
 do
 	local Frame = Instance.new("Frame")
 	Frame.Name = "HasteTimer"
@@ -7358,7 +7299,7 @@ Library:OnUnload(function()
 		Main_Game.tooloffset   = Vector3.zero
 	end
 
-	if Globals.OriginalGetMoveVector then 
+	if Globals.OriginalGetMoveVector then
 		local Controls = require(LocalPlayer.PlayerScripts.PlayerModule):GetControls()
 		Controls.GetMoveVector = Globals.OriginalGetMoveVector
 	end
@@ -7371,12 +7312,10 @@ end)
 
 while not Globals.MainUI do task.wait() end
 
--- Persist every Doors option through Diamond Hub's own config (same file as the rest of the hub).
 do
 	local function register(tbl)
 		for idx, el in pairs(tbl) do
 			if type(idx) == "string" and not DWin.Flags["d_" .. idx] and type(el) == "table" and el.Ghost then
-				-- Floor tab that is not drawn here: keep whatever was saved so it survives playing other floors.
 				if el.Type ~= "Button" then
 					DWin.Flags["d_" .. idx] = {
 						Get = function() return el.Saved end,
@@ -7408,7 +7347,6 @@ do
 end
 DWin:AddSettingsTab("Settings")
 do
-	-- Colours saved before the palette change would override the new ESP defaults: reset them once.
 	local StateIO = DWin._stateIO
 	local Saved = StateIO and StateIO.read()
 	if type(Saved) == "table" and type(Saved.flags) == "table" and Saved.flags["d__palette"] == nil then
@@ -7423,6 +7361,29 @@ do
 	DWin.Flags["d__palette"] = { Get = function() return 2 end, Set = function() end }
 end
 DWin:RestoreState()
+local restartedByQueue = genv.dh_ae
+genv.dh_ae = nil
+do
+	local AE = UI.AE
+	local function SetAutoExecuteToggle(Value)
+		UI.AESilent = true
+		pcall(function() Toggles.DiamondAutoExecute:SetValue(Value) end)
+		UI.AESilent = false
+	end
+	if AE.get() then
+		SetAutoExecuteToggle(true)
+		local ok, why = AE.queue()
+		if restartedByQueue then
+			if ok then
+				Functions.Notify({ Title = "Auto Execute", Body = "Script restarted after teleport" })
+			else
+				Functions.Notify({ Title = "Auto Execute", Body = why })
+			end
+		end
+	else
+		SetAutoExecuteToggle(false)
+	end
+end
 
 
 end
