@@ -19,6 +19,9 @@ local CONFIG = {
 	SignatureFlush = 10,
 	SignatureSamples = 1,
 	SkipServices = { CoreGui = true, CorePackages = true, RobloxReplicatedStorage = false },
+	GcRemotes = game.GameId == 2440500124,
+	RequireModules = game.GameId == 2440500124,
+	HookSignatures = game.GameId == 2440500124,
 }
 
 local env = (getgenv and getgenv()) or _G
@@ -96,6 +99,24 @@ local function Status(text)
 	Write("_status.txt", text)
 	print("[Dumper] " .. text)
 end
+
+local function Notify(title, text)
+	pcall(function()
+		game:GetService("StarterGui"):SetCore("SendNotification", { Title = title, Text = text, Duration = 8 })
+	end)
+end
+
+local function Phase(name, f)
+	Status("RUNNING | " .. name)
+	local ok, err = xpcall(f, debug.traceback)
+	if not ok then
+		Append("_errors.txt", name .. ": " .. tostring(err))
+		warn("[Dumper] " .. name .. " failed: " .. tostring(err))
+	end
+	task.wait()
+end
+
+Notify("Dumper", "Dump started, wait for the finish notification")
 
 local function FullName(inst)
 	local ok, name = pcall(function() return inst:GetFullName() end)
@@ -201,6 +222,7 @@ local REMOTE_CLASSES = { RemoteEvent = true, RemoteFunction = true, UnreliableRe
 
 Status("RUNNING " .. Now() .. " | collecting instances")
 local Instances = AllInstances()
+Write("info.txt", "game: " .. GameName .. "\nplaceId: " .. game.PlaceId .. "\ngameId: " .. game.GameId .. "\ninstances: " .. #Instances .. "\nrunning...")
 
 local Executor = "Unknown"
 pcall(function()
@@ -213,7 +235,104 @@ for _, k in ipairs({ "decompile", "getscripts", "getloadedmodules", "getnilinsta
 	capList[#capList + 1] = k .. "=" .. tostring(Caps[k] ~= nil)
 end
 
-do
+local Remotes = {}
+local RemoteSet = {}
+local function AddRemote(r)
+	if RemoteSet[r] then return false end
+	RemoteSet[r] = true
+	Remotes[#Remotes + 1] = r
+	return true
+end
+for _, i in ipairs(Instances) do
+	if REMOTE_CLASSES[i.ClassName] then AddRemote(i) end
+end
+local GcExtra = 0
+table.sort(Remotes, function(a, b) return FullName(a) < FullName(b) end)
+
+local function HandlerLines(remote)
+	local out = {}
+	if Caps.getconnections then
+		local signal = remote:IsA("RemoteFunction") and nil or remote.OnClientEvent
+		if signal then
+			local ok, conns = pcall(Caps.getconnections, signal)
+			if ok and type(conns) == "table" then
+				for _, c in ipairs(conns) do
+					local f = c.Function
+					if type(f) == "function" then
+						local ok2, src, line, name = pcall(debug.info, f, "sln")
+						if ok2 then
+							out[#out + 1] = "    handler: " .. ((name and name ~= "") and name or "anonymous") .. " @ " .. tostring(src) .. ":" .. tostring(line)
+						else
+							out[#out + 1] = "    handler: <c function>"
+						end
+					else
+						out[#out + 1] = "    handler: <no function>"
+					end
+				end
+			end
+		end
+	end
+	if remote:IsA("RemoteFunction") and Caps.getcallbackvalue then
+		local ok, cb = pcall(Caps.getcallbackvalue, remote, "OnClientInvoke")
+		if ok and type(cb) == "function" then
+			local ok2, src, line, name = pcall(debug.info, cb, "sln")
+			out[#out + 1] = "    OnClientInvoke: " .. (ok2 and (((name and name ~= "") and name or "anonymous") .. " @ " .. tostring(src) .. ":" .. tostring(line)) or "<c function>")
+		end
+	end
+	return out
+end
+
+local function WriteRemotes()
+	table.sort(Remotes, function(a, b) return FullName(a) < FullName(b) end)
+	local lines = {}
+	local y = Yielder()
+	for _, r in ipairs(Remotes) do
+		y()
+		lines[#lines + 1] = "[" .. r.ClassName .. "] " .. FullName(r)
+		for _, h in ipairs(HandlerLines(r)) do lines[#lines + 1] = h end
+	end
+	Write("remotes.txt", table.concat(lines, "\n"))
+end
+Phase("remotes.txt", function()
+	WriteRemotes()
+	Write("remotes_dynamic.txt", "")
+end)
+
+local PromptCount, ClickCount, TouchCount = 0, 0, 0
+Phase("interactables.txt", function()
+	local lines = {}
+	local function pos(i)
+		local p
+		pcall(function()
+			local parent = i.Parent
+			if parent:IsA("Attachment") then p = parent.WorldPosition
+			elseif parent:IsA("BasePart") then p = parent.Position
+			elseif parent:IsA("Model") then p = parent:GetPivot().Position end
+		end)
+		return p and (p.X .. ", " .. p.Y .. ", " .. p.Z) or "?"
+	end
+	for _, i in ipairs(Instances) do
+		local ok = pcall(function()
+			if i:IsA("ProximityPrompt") then
+				PromptCount += 1
+				lines[#lines + 1] = string.format('[ProximityPrompt] %s | action=%q object=%q hold=%s dist=%s key=%s enabled=%s los=%s | pos=%s',
+					FullName(i), i.ActionText, i.ObjectText, tostring(i.HoldDuration), tostring(i.MaxActivationDistance),
+					tostring(i.KeyboardKeyCode), tostring(i.Enabled), tostring(i.RequiresLineOfSight), pos(i))
+			elseif i:IsA("ClickDetector") then
+				ClickCount += 1
+				lines[#lines + 1] = string.format("[ClickDetector] %s | dist=%s | pos=%s", FullName(i), tostring(i.MaxActivationDistance), pos(i))
+			elseif i:IsA("TouchTransmitter") then
+				TouchCount += 1
+				lines[#lines + 1] = string.format("[TouchInterest] %s | pos=%s", FullName(i), pos(i))
+			end
+		end)
+	end
+	table.sort(lines)
+	Write("interactables.txt", table.concat(lines, "\n"))
+	Status("RUNNING | interactables.txt (" .. PromptCount .. " prompts, " .. ClickCount .. " clickdetectors, " .. TouchCount .. " touch)")
+end)
+
+Phase("tree.txt", function()
 	local lines = {}
 	local y = Yielder()
 	local function valueOf(i)
@@ -262,114 +381,11 @@ do
 	end
 	Write("tree.txt", table.concat(lines, "\n"))
 	Status("RUNNING | tree.txt (" .. #lines .. " lines)")
-end
-
-local Remotes = {}
-local RemoteSet = {}
-local function AddRemote(r)
-	if RemoteSet[r] then return false end
-	RemoteSet[r] = true
-	Remotes[#Remotes + 1] = r
-	return true
-end
-for _, i in ipairs(Instances) do
-	if REMOTE_CLASSES[i.ClassName] then AddRemote(i) end
-end
-local GcExtra = 0
-if Caps.getgc then
-	pcall(function()
-		for _, v in ipairs(Caps.getgc(true)) do
-			if typeof(v) == "Instance" and REMOTE_CLASSES[v.ClassName] and AddRemote(v) then
-				GcExtra += 1
-			end
-		end
-	end)
-end
-table.sort(Remotes, function(a, b) return FullName(a) < FullName(b) end)
-
-local function HandlerLines(remote)
-	local out = {}
-	if Caps.getconnections then
-		local signal = remote:IsA("RemoteFunction") and nil or remote.OnClientEvent
-		if signal then
-			local ok, conns = pcall(Caps.getconnections, signal)
-			if ok and type(conns) == "table" then
-				for _, c in ipairs(conns) do
-					local f = c.Function
-					if type(f) == "function" then
-						local ok2, src, line, name = pcall(debug.info, f, "sln")
-						if ok2 then
-							out[#out + 1] = "    handler: " .. ((name and name ~= "") and name or "anonymous") .. " @ " .. tostring(src) .. ":" .. tostring(line)
-						else
-							out[#out + 1] = "    handler: <c function>"
-						end
-					else
-						out[#out + 1] = "    handler: <no function>"
-					end
-				end
-			end
-		end
-	end
-	if remote:IsA("RemoteFunction") and Caps.getcallbackvalue then
-		local ok, cb = pcall(Caps.getcallbackvalue, remote, "OnClientInvoke")
-		if ok and type(cb) == "function" then
-			local ok2, src, line, name = pcall(debug.info, cb, "sln")
-			out[#out + 1] = "    OnClientInvoke: " .. (ok2 and (((name and name ~= "") and name or "anonymous") .. " @ " .. tostring(src) .. ":" .. tostring(line)) or "<c function>")
-		end
-	end
-	return out
-end
-
-do
-	local lines = {}
-	local y = Yielder()
-	for _, r in ipairs(Remotes) do
-		y()
-		lines[#lines + 1] = "[" .. r.ClassName .. "] " .. FullName(r)
-		for _, h in ipairs(HandlerLines(r)) do lines[#lines + 1] = h end
-	end
-	Write("remotes.txt", table.concat(lines, "\n"))
-	Write("remotes_dynamic.txt", "")
-	Status("RUNNING | remotes.txt (" .. #Remotes .. " remotes, getgc extra " .. GcExtra .. ")")
-end
-
-local PromptCount, ClickCount, TouchCount = 0, 0, 0
-do
-	local lines = {}
-	local function pos(i)
-		local p
-		pcall(function()
-			local parent = i.Parent
-			if parent:IsA("Attachment") then p = parent.WorldPosition
-			elseif parent:IsA("BasePart") then p = parent.Position
-			elseif parent:IsA("Model") then p = parent:GetPivot().Position end
-		end)
-		return p and (p.X .. ", " .. p.Y .. ", " .. p.Z) or "?"
-	end
-	for _, i in ipairs(Instances) do
-		local ok = pcall(function()
-			if i:IsA("ProximityPrompt") then
-				PromptCount += 1
-				lines[#lines + 1] = string.format('[ProximityPrompt] %s | action=%q object=%q hold=%s dist=%s key=%s enabled=%s los=%s | pos=%s',
-					FullName(i), i.ActionText, i.ObjectText, tostring(i.HoldDuration), tostring(i.MaxActivationDistance),
-					tostring(i.KeyboardKeyCode), tostring(i.Enabled), tostring(i.RequiresLineOfSight), pos(i))
-			elseif i:IsA("ClickDetector") then
-				ClickCount += 1
-				lines[#lines + 1] = string.format("[ClickDetector] %s | dist=%s | pos=%s", FullName(i), tostring(i.MaxActivationDistance), pos(i))
-			elseif i:IsA("TouchTransmitter") then
-				TouchCount += 1
-				lines[#lines + 1] = string.format("[TouchInterest] %s | pos=%s", FullName(i), pos(i))
-			end
-		end)
-	end
-	table.sort(lines)
-	Write("interactables.txt", table.concat(lines, "\n"))
-	Status("RUNNING | interactables.txt (" .. PromptCount .. " prompts, " .. ClickCount .. " clickdetectors, " .. TouchCount .. " touch)")
-end
+end)
 
 local Sources = {}
 local ScriptStats = { candidates = 0, decompiled = 0, bytecode = 0 }
-do
+Phase("scripts", function()
 	local seen, list = {}, {}
 	local function add(s)
 		if typeof(s) ~= "Instance" or seen[s] then return end
@@ -452,10 +468,11 @@ do
 	end
 	Write("scripts/_index.txt", table.concat(index, "\n"))
 	Status("RUNNING | scripts done (" .. ScriptStats.decompiled .. " decompiled / " .. ScriptStats.candidates .. ", bytecode " .. ScriptStats.bytecode .. ")")
-end
+end)
 
 local ModuleStats = { ok = 0, total = 0 }
-do
+Phase("module data", function()
+	if not CONFIG.RequireModules then return end
 	local function dumpValue(v, depth, seen, indent)
 		local t = typeof(v)
 		if t ~= "table" then return Ser(v, 2) end
@@ -514,9 +531,22 @@ do
 	end
 	Write("modules/_index.txt", table.concat(index, "\n"))
 	Status("RUNNING | module data " .. ModuleStats.ok .. " / " .. ModuleStats.total)
-end
+end)
 
-do
+
+Phase("remotes via getgc", function()
+	if not (CONFIG.GcRemotes and Caps.getgc) then return end
+	local list = Caps.getgc(false)
+	for i, v in ipairs(list) do
+		if i % 4000 == 0 then task.wait() end
+		if typeof(v) == "Instance" and REMOTE_CLASSES[v.ClassName] and AddRemote(v) then
+			GcExtra += 1
+		end
+	end
+	WriteRemotes()
+end)
+
+Phase("remote_usage.txt", function()
 	local byName = {}
 	for _, r in ipairs(Remotes) do
 		byName[r.Name] = byName[r.Name] or {}
@@ -542,7 +572,7 @@ do
 		end
 	end
 	Write("remote_usage.txt", table.concat(lines, "\n"))
-end
+end)
 
 local Sig = {}
 local SigDirty = false
@@ -577,7 +607,7 @@ local function Record(side, remote, method, ...)
 end
 
 local HookActive = false
-if Caps.hookmetamethod and Caps.getnamecallmethod and Caps.newcclosure then
+if CONFIG.HookSignatures and Caps.hookmetamethod and Caps.getnamecallmethod and Caps.newcclosure then
 	local old
 	local ok = pcall(function()
 		old = Caps.hookmetamethod(game, "__namecall", Caps.newcclosure(function(self, ...)
@@ -609,12 +639,14 @@ local function WatchIncoming(r)
 		Record("inc", r, "OnClientEvent", ...)
 	end)
 end
-for _, r in ipairs(Remotes) do pcall(WatchIncoming, r) end
+if CONFIG.HookSignatures then
+	for _, r in ipairs(Remotes) do pcall(WatchIncoming, r) end
+end
 
 game.DescendantAdded:Connect(function(d)
 	if REMOTE_CLASSES[d.ClassName] and AddRemote(d) then
 		Append("remotes_dynamic.txt", Clock() .. " [" .. d.ClassName .. "] " .. FullName(d))
-		pcall(WatchIncoming, d)
+		if CONFIG.HookSignatures then pcall(WatchIncoming, d) end
 	end
 end)
 
@@ -661,7 +693,8 @@ Write("info.txt", table.concat({
 	"player: " .. LocalPlayer.Name,
 	"executor: " .. Executor,
 	"date: " .. Now(),
-	"signature hook: " .. (HookActive and "active" or "unavailable"),
+	"signature hook: " .. (HookActive and "active" or (CONFIG.HookSignatures and "unavailable" or "off")),
+	"getgc remotes: " .. tostring(CONFIG.GcRemotes and Caps.getgc ~= nil) .. " | require modules: " .. tostring(CONFIG.RequireModules),
 	"remotes: " .. #Remotes .. " (getgc extra: " .. GcExtra .. ") | prompts: " .. PromptCount .. " | clickdetectors: " .. ClickCount .. " | touch: " .. TouchCount,
 	"scripts: " .. ScriptStats.decompiled .. " decompiled / " .. ScriptStats.candidates .. " candidates | bytecode saved: " .. ScriptStats.bytecode,
 	"module data: " .. ModuleStats.ok .. " / " .. ModuleStats.total,
@@ -670,3 +703,4 @@ Write("info.txt", table.concat({
 
 Status(string.format("DONE %s | took %.1fs | %d remotes, %d scripts, %d modules -> workspace/%s\nsignature hooks keep running; signatures.* update while you play",
 	Now(), os.clock() - StartClock, #Remotes, ScriptStats.decompiled, ModuleStats.ok, ROOT))
+Notify("Dumper", string.format("Dump finished: %d remotes, %d scripts, %d interactables. Folder: %s", #Remotes, ScriptStats.decompiled, PromptCount + ClickCount + TouchCount, ROOT))
