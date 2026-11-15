@@ -378,7 +378,10 @@ if SIGNATURES and hookmetamethod and getnamecallmethod and newcclosure then
 	local function Watch(r)
 		if Watched[r] or r:IsA("RemoteFunction") then return end
 		Watched[r] = true
-		r.OnClientEvent:Connect(function(...) Record("inc", r, "OnClientEvent", ...) end)
+		r.OnClientEvent:Connect(function(...)
+			local ok, err = pcall(Record, "inc", r, "OnClientEvent", ...)
+			if not ok then pcall(Write, "_errors.txt", "signature record: " .. tostring(err)) end
+		end)
 	end
 	for _, r in ipairs(RemoteObjs) do pcall(Watch, r) end
 	game.DescendantAdded:Connect(function(d)
@@ -412,11 +415,12 @@ if SIGNATURES and hookmetamethod and getnamecallmethod and newcclosure then
 	end
 	task.spawn(function()
 		while true do
-			task.wait(10)
+			task.wait(5)
 			pcall(Flush)
 		end
 	end)
 	KeepRunning = hooked
+	Write("signatures.txt", "hook " .. (hooked and "installed" or "FAILED") .. ", waiting for remote traffic (flushes every 5s)")
 end
 
 Notify(string.format("Dump finished in %.0fs: %d remotes, %d scripts. Folder: %s", os.clock() - t0, #Remotes, decompiled, ROOT))
