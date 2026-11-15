@@ -1,0 +1,672 @@
+if not game:IsLoaded() then game.Loaded:Wait() end
+if getgenv and getgenv().__DiamondDumperRunning then return end
+if getgenv then getgenv().__DiamondDumperRunning = true end
+
+local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
+local RunService = game:GetService("RunService")
+while not Players.LocalPlayer do task.wait() end
+local LocalPlayer = Players.LocalPlayer
+
+local CONFIG = {
+	DecompileTimeout = 10,
+	YieldEvery = 15,
+	TreeMaxDepth = 12,
+	TreeWorkspaceDepth = 7,
+	TreeMaxChildren = 400,
+	ModuleDepth = 4,
+	ModuleMaxKeys = 200,
+	SignatureFlush = 10,
+	SignatureSamples = 1,
+	SkipServices = { CoreGui = true, CorePackages = true, RobloxReplicatedStorage = false },
+}
+
+local env = (getgenv and getgenv()) or _G
+local function fn(name)
+	local v = env[name]
+	if type(v) == "function" then return v end
+	local ok, g = pcall(function() return getfenv(0)[name] end)
+	if ok and type(g) == "function" then return g end
+	return nil
+end
+
+local Caps = {
+	decompile = fn("decompile"),
+	getscripts = fn("getscripts"),
+	getloadedmodules = fn("getloadedmodules"),
+	getnilinstances = fn("getnilinstances"),
+	getconnections = fn("getconnections"),
+	getgc = fn("getgc"),
+	getscriptbytecode = fn("getscriptbytecode") or fn("dumpstring"),
+	getscripthash = fn("getscripthash"),
+	getcallingscript = fn("getcallingscript"),
+	getcallbackvalue = fn("getcallbackvalue"),
+	hookmetamethod = fn("hookmetamethod"),
+	newcclosure = fn("newcclosure"),
+	getnamecallmethod = fn("getnamecallmethod"),
+	checkcaller = fn("checkcaller"),
+	writefile = fn("writefile"),
+	appendfile = fn("appendfile"),
+	makefolder = fn("makefolder"),
+	isfolder = fn("isfolder"),
+	require = fn("require"),
+}
+if not (Caps.writefile and Caps.makefolder) then
+	warn("[Dumper] writefile / makefolder are required")
+	return
+end
+
+local StartClock = os.clock()
+local function Now() return os.date("%Y-%m-%d %H:%M:%S") end
+local function Clock() return os.date("%H:%M:%S") end
+
+local GameName = "Unknown"
+pcall(function()
+	GameName = game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name
+end)
+
+local function Sanitize(s, max)
+	s = tostring(s):gsub("[^%w%._%-]", "_")
+	if max and #s > max then s = s:sub(1, max) end
+	return s
+end
+
+local ROOT = "Dump_" .. game.PlaceId .. "_" .. Sanitize(GameName, 40)
+local function Folder(p)
+	pcall(function()
+		if not (Caps.isfolder and Caps.isfolder(p)) then Caps.makefolder(p) end
+	end)
+end
+Folder(ROOT)
+Folder(ROOT .. "/scripts")
+Folder(ROOT .. "/modules")
+Folder(ROOT .. "/bytecode")
+
+local function Write(name, content)
+	local ok, err = pcall(Caps.writefile, ROOT .. "/" .. name, content)
+	if not ok then warn("[Dumper] write " .. name .. ": " .. tostring(err)) end
+end
+local function Append(name, line)
+	if Caps.appendfile then
+		pcall(Caps.appendfile, ROOT .. "/" .. name, line .. "\n")
+	end
+end
+
+local function Status(text)
+	Write("_status.txt", text)
+	print("[Dumper] " .. text)
+end
+
+local function FullName(inst)
+	local ok, name = pcall(function() return inst:GetFullName() end)
+	return ok and name or tostring(inst)
+end
+
+local function Ser(v, depth)
+	depth = depth or 0
+	local t = typeof(v)
+	if t == "nil" then return "nil" end
+	if t == "string" then
+		if #v > 200 then v = v:sub(1, 200) .. "..." end
+		return HttpService:JSONEncode(v)
+	end
+	if t == "number" or t == "boolean" then return tostring(v) end
+	if t == "Instance" then return "<" .. v.ClassName .. "> " .. FullName(v) end
+	if t == "buffer" then return "buffer:len=" .. buffer.len(v) end
+	if t == "table" then
+		if depth >= 2 then return "{...}" end
+		local parts, n = {}, 0
+		for k, x in pairs(v) do
+			n += 1
+			if n > 12 then parts[#parts + 1] = "..." break end
+			parts[#parts + 1] = "[" .. Ser(k, depth + 1) .. "]=" .. Ser(x, depth + 1)
+		end
+		return "{" .. table.concat(parts, ", ") .. "}"
+	end
+	if t == "function" then
+		local ok, src, line, name = pcall(debug.info, v, "sln")
+		if ok then return "function " .. tostring(name ~= "" and name or "anonymous") .. " @ " .. tostring(src) .. ":" .. tostring(line) end
+		return "function"
+	end
+	return t .. ":" .. tostring(v)
+end
+
+local function TypeSig(...)
+	local n = select("#", ...)
+	if n == 0 then return "()" end
+	local out = {}
+	for i = 1, n do out[i] = typeof((select(i, ...))) end
+	return table.concat(out, ",")
+end
+
+local function Sample(...)
+	local n = select("#", ...)
+	local out = {}
+	for i = 1, n do
+		local v = select(i, ...)
+		local t = typeof(v)
+		if t == "string" or t == "number" or t == "boolean" then
+			out[i] = v
+		else
+			out[i] = Ser(v, 1)
+		end
+	end
+	return out
+end
+
+local function Yielder()
+	local count = 0
+	return function()
+		count += 1
+		if count % CONFIG.YieldEvery == 0 then task.wait() end
+	end
+end
+
+local function SafeServices()
+	local list = {}
+	for _, s in ipairs(game:GetChildren()) do
+		local ok, name = pcall(function() return s.Name end)
+		if ok and not CONFIG.SkipServices[s.ClassName] and not CONFIG.SkipServices[name] then
+			list[#list + 1] = s
+		end
+	end
+	return list
+end
+
+local function AllInstances()
+	local seen, out = {}, {}
+	local function add(i)
+		if typeof(i) == "Instance" and not seen[i] then
+			seen[i] = true
+			out[#out + 1] = i
+		end
+	end
+	for _, s in ipairs(SafeServices()) do
+		pcall(function()
+			for _, d in ipairs(s:GetDescendants()) do add(d) end
+		end)
+	end
+	if Caps.getnilinstances then
+		pcall(function()
+			for _, i in ipairs(Caps.getnilinstances()) do
+				add(i)
+				pcall(function() for _, d in ipairs(i:GetDescendants()) do add(d) end end)
+			end
+		end)
+	end
+	return out
+end
+
+local REMOTE_CLASSES = { RemoteEvent = true, RemoteFunction = true, UnreliableRemoteEvent = true }
+
+Status("RUNNING " .. Now() .. " | collecting instances")
+local Instances = AllInstances()
+
+local Executor = "Unknown"
+pcall(function()
+	if identifyexecutor then Executor = tostring((identifyexecutor())) end
+end)
+local capList = {}
+for _, k in ipairs({ "decompile", "getscripts", "getloadedmodules", "getnilinstances", "getconnections", "getgc",
+	"getscriptbytecode", "getscripthash", "getcallingscript", "getcallbackvalue", "hookmetamethod", "newcclosure",
+	"getnamecallmethod", "checkcaller", "writefile", "appendfile", "makefolder" }) do
+	capList[#capList + 1] = k .. "=" .. tostring(Caps[k] ~= nil)
+end
+
+do
+	local lines = {}
+	local y = Yielder()
+	local function valueOf(i)
+		if i:IsA("ValueBase") then
+			local ok, v = pcall(function() return i.Value end)
+			if ok then return " = " .. Ser(v, 1) end
+		end
+		return ""
+	end
+	local function attrsOf(i)
+		local ok, a = pcall(function() return i:GetAttributes() end)
+		if ok and next(a) then return " " .. Ser(a, 1) end
+		return ""
+	end
+	local function walk(i, depth, maxDepth)
+		y()
+		local okLine, line = pcall(function()
+			return string.rep("  ", depth) .. i.Name .. " [" .. i.ClassName .. "]" .. valueOf(i) .. attrsOf(i)
+		end)
+		if not okLine then return end
+		lines[#lines + 1] = line
+		if depth >= maxDepth then return end
+		local ok, kids = pcall(function() return i:GetChildren() end)
+		if not ok then return end
+		if #kids > CONFIG.TreeMaxChildren then
+			local counts = {}
+			for _, k in ipairs(kids) do
+				local key = k.Name .. " [" .. k.ClassName .. "]"
+				counts[key] = (counts[key] or 0) + 1
+			end
+			for key, c in pairs(counts) do
+				lines[#lines + 1] = string.rep("  ", depth + 1) .. key .. " x" .. c
+			end
+			return
+		end
+		for _, k in ipairs(kids) do walk(k, depth + 1, maxDepth) end
+	end
+	for _, s in ipairs(SafeServices()) do
+		walk(s, 0, s.ClassName == "Workspace" and CONFIG.TreeWorkspaceDepth or CONFIG.TreeMaxDepth)
+	end
+	if Caps.getnilinstances then
+		lines[#lines + 1] = "<nil instances>"
+		pcall(function()
+			for _, i in ipairs(Caps.getnilinstances()) do walk(i, 1, 3) end
+		end)
+	end
+	Write("tree.txt", table.concat(lines, "\n"))
+	Status("RUNNING | tree.txt (" .. #lines .. " lines)")
+end
+
+local Remotes = {}
+local RemoteSet = {}
+local function AddRemote(r)
+	if RemoteSet[r] then return false end
+	RemoteSet[r] = true
+	Remotes[#Remotes + 1] = r
+	return true
+end
+for _, i in ipairs(Instances) do
+	if REMOTE_CLASSES[i.ClassName] then AddRemote(i) end
+end
+local GcExtra = 0
+if Caps.getgc then
+	pcall(function()
+		for _, v in ipairs(Caps.getgc(true)) do
+			if typeof(v) == "Instance" and REMOTE_CLASSES[v.ClassName] and AddRemote(v) then
+				GcExtra += 1
+			end
+		end
+	end)
+end
+table.sort(Remotes, function(a, b) return FullName(a) < FullName(b) end)
+
+local function HandlerLines(remote)
+	local out = {}
+	if Caps.getconnections then
+		local signal = remote:IsA("RemoteFunction") and nil or remote.OnClientEvent
+		if signal then
+			local ok, conns = pcall(Caps.getconnections, signal)
+			if ok and type(conns) == "table" then
+				for _, c in ipairs(conns) do
+					local f = c.Function
+					if type(f) == "function" then
+						local ok2, src, line, name = pcall(debug.info, f, "sln")
+						if ok2 then
+							out[#out + 1] = "    handler: " .. ((name and name ~= "") and name or "anonymous") .. " @ " .. tostring(src) .. ":" .. tostring(line)
+						else
+							out[#out + 1] = "    handler: <c function>"
+						end
+					else
+						out[#out + 1] = "    handler: <no function>"
+					end
+				end
+			end
+		end
+	end
+	if remote:IsA("RemoteFunction") and Caps.getcallbackvalue then
+		local ok, cb = pcall(Caps.getcallbackvalue, remote, "OnClientInvoke")
+		if ok and type(cb) == "function" then
+			local ok2, src, line, name = pcall(debug.info, cb, "sln")
+			out[#out + 1] = "    OnClientInvoke: " .. (ok2 and (((name and name ~= "") and name or "anonymous") .. " @ " .. tostring(src) .. ":" .. tostring(line)) or "<c function>")
+		end
+	end
+	return out
+end
+
+do
+	local lines = {}
+	local y = Yielder()
+	for _, r in ipairs(Remotes) do
+		y()
+		lines[#lines + 1] = "[" .. r.ClassName .. "] " .. FullName(r)
+		for _, h in ipairs(HandlerLines(r)) do lines[#lines + 1] = h end
+	end
+	Write("remotes.txt", table.concat(lines, "\n"))
+	Write("remotes_dynamic.txt", "")
+	Status("RUNNING | remotes.txt (" .. #Remotes .. " remotes, getgc extra " .. GcExtra .. ")")
+end
+
+local PromptCount, ClickCount, TouchCount = 0, 0, 0
+do
+	local lines = {}
+	local function pos(i)
+		local p
+		pcall(function()
+			local parent = i.Parent
+			if parent:IsA("Attachment") then p = parent.WorldPosition
+			elseif parent:IsA("BasePart") then p = parent.Position
+			elseif parent:IsA("Model") then p = parent:GetPivot().Position end
+		end)
+		return p and (p.X .. ", " .. p.Y .. ", " .. p.Z) or "?"
+	end
+	for _, i in ipairs(Instances) do
+		local ok = pcall(function()
+			if i:IsA("ProximityPrompt") then
+				PromptCount += 1
+				lines[#lines + 1] = string.format('[ProximityPrompt] %s | action=%q object=%q hold=%s dist=%s key=%s enabled=%s los=%s | pos=%s',
+					FullName(i), i.ActionText, i.ObjectText, tostring(i.HoldDuration), tostring(i.MaxActivationDistance),
+					tostring(i.KeyboardKeyCode), tostring(i.Enabled), tostring(i.RequiresLineOfSight), pos(i))
+			elseif i:IsA("ClickDetector") then
+				ClickCount += 1
+				lines[#lines + 1] = string.format("[ClickDetector] %s | dist=%s | pos=%s", FullName(i), tostring(i.MaxActivationDistance), pos(i))
+			elseif i:IsA("TouchTransmitter") then
+				TouchCount += 1
+				lines[#lines + 1] = string.format("[TouchInterest] %s | pos=%s", FullName(i), pos(i))
+			end
+		end)
+	end
+	table.sort(lines)
+	Write("interactables.txt", table.concat(lines, "\n"))
+	Status("RUNNING | interactables.txt (" .. PromptCount .. " prompts, " .. ClickCount .. " clickdetectors, " .. TouchCount .. " touch)")
+end
+
+local Sources = {}
+local ScriptStats = { candidates = 0, decompiled = 0, bytecode = 0 }
+do
+	local seen, list = {}, {}
+	local function add(s)
+		if typeof(s) ~= "Instance" or seen[s] then return end
+		local ok, isScript = pcall(function()
+			if s:IsA("LocalScript") or s:IsA("ModuleScript") then return true end
+			return s:IsA("Script") and s.RunContext == Enum.RunContext.Client
+		end)
+		if not (ok and isScript) then return end
+		local ok2, path = pcall(FullName, s)
+		if ok2 and (path:find("^CoreGui") or path:find("^CorePackages")) then return end
+		seen[s] = true
+		list[#list + 1] = s
+	end
+	for _, i in ipairs(Instances) do add(i) end
+	if Caps.getscripts then pcall(function() for _, s in ipairs(Caps.getscripts()) do add(s) end end) end
+	if Caps.getloadedmodules then pcall(function() for _, s in ipairs(Caps.getloadedmodules()) do add(s) end end) end
+	table.sort(list, function(a, b) return FullName(a) < FullName(b) end)
+	ScriptStats.candidates = #list
+
+	local used, index = {}, {}
+	local function fileName(path, ext)
+		local base = Sanitize(path, 110)
+		local name, n = base, 1
+		while used[name] do
+			n += 1
+			name = base .. "_" .. n
+		end
+		used[name] = true
+		return name .. ext
+	end
+
+	local function decompileWithTimeout(s)
+		if not Caps.decompile then return false, "no decompile" end
+		local done, ok, res = false, false, nil
+		local thread = task.spawn(function()
+			ok, res = pcall(Caps.decompile, s)
+			done = true
+		end)
+		local t0 = os.clock()
+		while not done and os.clock() - t0 < CONFIG.DecompileTimeout do task.wait() end
+		if not done then
+			pcall(task.cancel, thread)
+			return false, "timeout"
+		end
+		if ok and type(res) == "string" and #res > 0 then return true, res end
+		return false, tostring(res)
+	end
+
+	for n, s in ipairs(list) do
+		local path = FullName(s)
+		local hash = ""
+		if Caps.getscripthash then
+			local okH, h = pcall(Caps.getscripthash, s)
+			if okH and h then hash = " hash=" .. tostring(h) end
+		end
+		local ok, src = decompileWithTimeout(s)
+		if ok then
+			local file = fileName(path, ".lua")
+			Write("scripts/" .. file, "-- " .. path .. "\n-- " .. s.ClassName .. "\n" .. src)
+			Sources[path] = src
+			ScriptStats.decompiled += 1
+			index[#index + 1] = path .. " -> " .. file .. " [ok]" .. hash
+		else
+			local saved = false
+			if Caps.getscriptbytecode then
+				local okB, bc = pcall(Caps.getscriptbytecode, s)
+				if okB and type(bc) == "string" and #bc > 0 then
+					local file = fileName(path, ".bin")
+					Write("bytecode/" .. file, bc)
+					ScriptStats.bytecode += 1
+					saved = true
+					index[#index + 1] = path .. " -> bytecode/" .. file .. " [fail: " .. src .. "]" .. hash
+				end
+			end
+			if not saved then index[#index + 1] = path .. " -> - [fail: " .. src .. "]" .. hash end
+		end
+		if n % 25 == 0 then
+			Status("RUNNING | scripts " .. n .. "/" .. #list)
+		end
+	end
+	Write("scripts/_index.txt", table.concat(index, "\n"))
+	Status("RUNNING | scripts done (" .. ScriptStats.decompiled .. " decompiled / " .. ScriptStats.candidates .. ", bytecode " .. ScriptStats.bytecode .. ")")
+end
+
+local ModuleStats = { ok = 0, total = 0 }
+do
+	local function dumpValue(v, depth, seen, indent)
+		local t = typeof(v)
+		if t ~= "table" then return Ser(v, 2) end
+		if seen[v] then return "<cycle>" end
+		if depth >= CONFIG.ModuleDepth then return "{...}" end
+		seen[v] = true
+		local keys = {}
+		for k in pairs(v) do keys[#keys + 1] = k end
+		table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
+		if #keys == 0 then seen[v] = nil return "{}" end
+		local out = { "{" }
+		for i, k in ipairs(keys) do
+			if i > CONFIG.ModuleMaxKeys then
+				out[#out + 1] = indent .. "  -- " .. (#keys - CONFIG.ModuleMaxKeys) .. " more"
+				break
+			end
+			local key = type(k) == "string" and k:match("^[%a_][%w_]*$") and k or ("[" .. Ser(k, 2) .. "]")
+			out[#out + 1] = indent .. "  " .. key .. " = " .. dumpValue(v[k], depth + 1, seen, indent .. "  ") .. ","
+		end
+		out[#out + 1] = indent .. "}"
+		seen[v] = nil
+		return table.concat(out, "\n")
+	end
+
+	local mods = {}
+	if Caps.getloadedmodules then
+		pcall(function()
+			for _, m in ipairs(Caps.getloadedmodules()) do
+				if typeof(m) == "Instance" and m:IsA("ModuleScript") then
+					local path = FullName(m)
+					if not (path:find("^CoreGui") or path:find("^CorePackages")) then mods[#mods + 1] = m end
+				end
+			end
+		end)
+	end
+	ModuleStats.total = #mods
+	local index, used = {}, {}
+	local req = Caps.require or require
+	local y = Yielder()
+	for _, m in ipairs(mods) do
+		y()
+		local path = FullName(m)
+		local ok, data = pcall(req, m)
+		if ok then
+			local base = Sanitize(path, 110)
+			local name, n = base, 1
+			while used[name] do n += 1 name = base .. "_" .. n end
+			used[name] = true
+			local okD, text = pcall(dumpValue, data, 0, {}, "")
+			Write("modules/" .. name .. ".lua", "-- " .. path .. " (runtime data)\nreturn " .. (okD and text or ("-- dump failed: " .. tostring(text))))
+			index[#index + 1] = path .. " -> " .. name .. ".lua"
+			ModuleStats.ok += 1
+		else
+			index[#index + 1] = path .. " -> - [require failed: " .. tostring(data) .. "]"
+		end
+	end
+	Write("modules/_index.txt", table.concat(index, "\n"))
+	Status("RUNNING | module data " .. ModuleStats.ok .. " / " .. ModuleStats.total)
+end
+
+do
+	local byName = {}
+	for _, r in ipairs(Remotes) do
+		byName[r.Name] = byName[r.Name] or {}
+		table.insert(byName[r.Name], FullName(r))
+	end
+	local names = {}
+	for name in pairs(byName) do names[#names + 1] = name end
+	table.sort(names)
+	local lines = {}
+	local y = Yielder()
+	for _, name in ipairs(names) do
+		y()
+		lines[#lines + 1] = name .. "  (" .. table.concat(byName[name], ", ") .. ")"
+		local users = {}
+		for path, src in pairs(Sources) do
+			if src:find(name, 1, true) then users[#users + 1] = path end
+		end
+		table.sort(users)
+		if #users == 0 then
+			lines[#lines + 1] = "    used by: <no decompiled script mentions it>"
+		else
+			for _, u in ipairs(users) do lines[#lines + 1] = "    used by: " .. u end
+		end
+	end
+	Write("remote_usage.txt", table.concat(lines, "\n"))
+end
+
+local Sig = {}
+local SigDirty = false
+local function Entry(remote)
+	local path = FullName(remote)
+	local e = Sig[path]
+	if not e then
+		e = {
+			class = remote.ClassName,
+			out = { calls = 0, variants = {}, nvariants = 0 },
+			inc = { calls = 0, variants = {}, nvariants = 0 },
+			callers = {}, ncallers = 0,
+		}
+		Sig[path] = e
+	end
+	return e
+end
+local function Record(side, remote, method, ...)
+	local e = Entry(remote)
+	local bucket = e[side]
+	bucket.calls += 1
+	local sig = TypeSig(...)
+	local v = bucket.variants[sig]
+	if not v then
+		bucket.nvariants += 1
+		v = { method = method, count = 0, sample = Sample(...) }
+		bucket.variants[sig] = v
+	end
+	v.count += 1
+	SigDirty = true
+	return e
+end
+
+local HookActive = false
+if Caps.hookmetamethod and Caps.getnamecallmethod and Caps.newcclosure then
+	local old
+	local ok = pcall(function()
+		old = Caps.hookmetamethod(game, "__namecall", Caps.newcclosure(function(self, ...)
+			local method = Caps.getnamecallmethod()
+			if (method == "FireServer" or method == "InvokeServer")
+				and typeof(self) == "Instance" and REMOTE_CLASSES[self.ClassName]
+				and not (Caps.checkcaller and Caps.checkcaller()) then
+				local callerScript = Caps.getcallingscript and Caps.getcallingscript()
+				pcall(function(...)
+					local e = Record("out", self, method, ...)
+					if Caps.getcallingscript then
+						local caller = callerScript and FullName(callerScript) or "?"
+						if not e.callers[caller] then e.ncallers += 1 end
+						e.callers[caller] = (e.callers[caller] or 0) + 1
+					end
+				end, ...)
+			end
+			return old(self, ...)
+		end))
+	end)
+	HookActive = ok
+end
+
+local Watched = {}
+local function WatchIncoming(r)
+	if Watched[r] or not (r:IsA("RemoteEvent") or r:IsA("UnreliableRemoteEvent")) then return end
+	Watched[r] = true
+	r.OnClientEvent:Connect(function(...)
+		Record("inc", r, "OnClientEvent", ...)
+	end)
+end
+for _, r in ipairs(Remotes) do pcall(WatchIncoming, r) end
+
+game.DescendantAdded:Connect(function(d)
+	if REMOTE_CLASSES[d.ClassName] and AddRemote(d) then
+		Append("remotes_dynamic.txt", Clock() .. " [" .. d.ClassName .. "] " .. FullName(d))
+		pcall(WatchIncoming, d)
+	end
+end)
+
+local function FlushSignatures()
+	if not SigDirty then return end
+	SigDirty = false
+	local paths = {}
+	for p in pairs(Sig) do paths[#paths + 1] = p end
+	table.sort(paths)
+	local lines = {}
+	for _, p in ipairs(paths) do
+		local e = Sig[p]
+		lines[#lines + 1] = p .. " [" .. e.class .. "]"
+		for _, side in ipairs({ "out", "inc" }) do
+			local b = e[side]
+			if b.calls > 0 then
+				lines[#lines + 1] = "  " .. (side == "out" and "OUT" or "IN ") .. " calls=" .. b.calls
+				for sig, v in pairs(b.variants) do
+					local okS, sample = pcall(HttpService.JSONEncode, HttpService, v.sample)
+					lines[#lines + 1] = "    (" .. sig .. ") x" .. v.count .. "  sample=" .. (okS and sample or "?")
+				end
+			end
+		end
+		for caller, c in pairs(e.callers) do
+			lines[#lines + 1] = "  caller: " .. caller .. " x" .. c
+		end
+	end
+	Write("signatures.txt", table.concat(lines, "\n"))
+	local okJ, json = pcall(HttpService.JSONEncode, HttpService, Sig)
+	if okJ then Write("signatures.json", json) end
+end
+task.spawn(function()
+	while true do
+		task.wait(CONFIG.SignatureFlush)
+		pcall(FlushSignatures)
+	end
+end)
+
+Write("info.txt", table.concat({
+	"game: " .. GameName,
+	"placeId: " .. game.PlaceId,
+	"gameId: " .. game.GameId,
+	"jobId: " .. game.JobId,
+	"player: " .. LocalPlayer.Name,
+	"executor: " .. Executor,
+	"date: " .. Now(),
+	"signature hook: " .. (HookActive and "active" or "unavailable"),
+	"remotes: " .. #Remotes .. " (getgc extra: " .. GcExtra .. ") | prompts: " .. PromptCount .. " | clickdetectors: " .. ClickCount .. " | touch: " .. TouchCount,
+	"scripts: " .. ScriptStats.decompiled .. " decompiled / " .. ScriptStats.candidates .. " candidates | bytecode saved: " .. ScriptStats.bytecode,
+	"module data: " .. ModuleStats.ok .. " / " .. ModuleStats.total,
+	"caps: " .. table.concat(capList, ", "),
+}, "\n"))
+
+Status(string.format("DONE %s | took %.1fs | %d remotes, %d scripts, %d modules -> workspace/%s\nsignature hooks keep running; signatures.* update while you play",
+	Now(), os.clock() - StartClock, #Remotes, ScriptStats.decompiled, ModuleStats.ok, ROOT))
