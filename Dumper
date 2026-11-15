@@ -13,7 +13,7 @@ local HANDLERS = true
 local GETGC = true
 local MODULES = true
 local SIGNATURES = true
-local HOOK_OUTGOING = false
+local HOOK_OUTGOING = true
 local MODULE_TIMEOUT = 4
 local MODULE_DEPTH = 4
 local HttpService = game:GetService("HttpService")
@@ -411,8 +411,6 @@ if SIGNATURES then
 			for c, n in pairs(e.callers) do lines[#lines + 1] = "  caller: " .. c .. " x" .. n end
 		end
 		Write("signatures.txt", table.concat(lines, "\n"))
-		local ok, json = pcall(HttpService.JSONEncode, HttpService, Sig)
-		if ok then Write("signatures.json", json) end
 	end
 	task.spawn(function()
 		while true do
