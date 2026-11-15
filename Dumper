@@ -22,6 +22,10 @@ local CONFIG = {
 	GcRemotes = game.GameId == 2440500124,
 	RequireModules = game.GameId == 2440500124,
 	HookSignatures = game.GameId == 2440500124,
+	NilInstances = game.GameId == 2440500124,
+	TreeDetails = game.GameId == 2440500124,
+	TreeMaxNodes = game.GameId == 2440500124 and 400000 or 40000,
+	TreeYieldEvery = game.GameId == 2440500124 and 15 or 4,
 }
 
 local env = (getgenv and getgenv()) or _G
@@ -175,11 +179,11 @@ local function Sample(...)
 	return out
 end
 
-local function Yielder()
+local function Yielder(every)
 	local count = 0
 	return function()
 		count += 1
-		if count % CONFIG.YieldEvery == 0 then task.wait() end
+		if count % (every or CONFIG.YieldEvery) == 0 then task.wait() end
 	end
 end
 
@@ -207,7 +211,7 @@ local function AllInstances()
 			for _, d in ipairs(s:GetDescendants()) do add(d) end
 		end)
 	end
-	if Caps.getnilinstances then
+	if CONFIG.NilInstances and Caps.getnilinstances then
 		pcall(function()
 			for _, i in ipairs(Caps.getnilinstances()) do
 				add(i)
@@ -252,7 +256,8 @@ table.sort(Remotes, function(a, b) return FullName(a) < FullName(b) end)
 local function HandlerLines(remote)
 	local out = {}
 	if Caps.getconnections then
-		local signal = remote:IsA("RemoteFunction") and nil or remote.OnClientEvent
+		local signal = nil
+		if not remote:IsA("RemoteFunction") then signal = remote.OnClientEvent end
 		if signal then
 			local ok, conns = pcall(Caps.getconnections, signal)
 			if ok and type(conns) == "table" then
@@ -332,59 +337,6 @@ Phase("interactables.txt", function()
 	Status("RUNNING | interactables.txt (" .. PromptCount .. " prompts, " .. ClickCount .. " clickdetectors, " .. TouchCount .. " touch)")
 end)
 
-Phase("tree.txt", function()
-	local lines = {}
-	local y = Yielder()
-	local function valueOf(i)
-		if i:IsA("ValueBase") then
-			local ok, v = pcall(function() return i.Value end)
-			if ok then return " = " .. Ser(v, 1) end
-		end
-		return ""
-	end
-	local function attrsOf(i)
-		local ok, a = pcall(function() return i:GetAttributes() end)
-		if ok and next(a) then return " " .. Ser(a, 1) end
-		return ""
-	end
-	local function walk(i, depth, maxDepth)
-		y()
-		local okLine, line = pcall(function()
-			return string.rep("  ", depth) .. i.Name .. " [" .. i.ClassName .. "]" .. valueOf(i) .. attrsOf(i)
-		end)
-		if not okLine then return end
-		lines[#lines + 1] = line
-		if depth >= maxDepth then return end
-		local ok, kids = pcall(function() return i:GetChildren() end)
-		if not ok then return end
-		if #kids > CONFIG.TreeMaxChildren then
-			local counts = {}
-			for _, k in ipairs(kids) do
-				local key = k.Name .. " [" .. k.ClassName .. "]"
-				counts[key] = (counts[key] or 0) + 1
-			end
-			for key, c in pairs(counts) do
-				lines[#lines + 1] = string.rep("  ", depth + 1) .. key .. " x" .. c
-			end
-			return
-		end
-		for _, k in ipairs(kids) do walk(k, depth + 1, maxDepth) end
-	end
-	for _, s in ipairs(SafeServices()) do
-		walk(s, 0, s.ClassName == "Workspace" and CONFIG.TreeWorkspaceDepth or CONFIG.TreeMaxDepth)
-	end
-	if Caps.getnilinstances then
-		lines[#lines + 1] = "<nil instances>"
-		pcall(function()
-			for _, i in ipairs(Caps.getnilinstances()) do walk(i, 1, 3) end
-		end)
-	end
-	Write("tree.txt", table.concat(lines, "\n"))
-	Status("RUNNING | tree.txt (" .. #lines .. " lines)")
-end)
-
-local Sources = {}
-local ScriptStats = { candidates = 0, decompiled = 0, bytecode = 0 }
 Phase("scripts", function()
 	local seen, list = {}, {}
 	local function add(s)
@@ -573,6 +525,63 @@ Phase("remote_usage.txt", function()
 	end
 	Write("remote_usage.txt", table.concat(lines, "\n"))
 end)
+
+Phase("tree.txt", function()
+	local lines = {}
+	local y = Yielder(CONFIG.TreeYieldEvery)
+	local nodes = 0
+	local function valueOf(i)
+		if i:IsA("ValueBase") then
+			local ok, v = pcall(function() return i.Value end)
+			if ok then return " = " .. Ser(v, 1) end
+		end
+		return ""
+	end
+	local function attrsOf(i)
+		local ok, a = pcall(function() return i:GetAttributes() end)
+		if ok and next(a) then return " " .. Ser(a, 1) end
+		return ""
+	end
+	local function walk(i, depth, maxDepth)
+		y()
+		nodes += 1
+		if nodes > CONFIG.TreeMaxNodes then return end
+		local okLine, line = pcall(function()
+			return string.rep("  ", depth) .. i.Name .. " [" .. i.ClassName .. "]" .. (CONFIG.TreeDetails and (valueOf(i) .. attrsOf(i)) or "")
+		end)
+		if not okLine then return end
+		lines[#lines + 1] = line
+		if depth >= maxDepth then return end
+		local ok, kids = pcall(function() return i:GetChildren() end)
+		if not ok then return end
+		if #kids > CONFIG.TreeMaxChildren then
+			local counts = {}
+			for _, k in ipairs(kids) do
+				local key = k.Name .. " [" .. k.ClassName .. "]"
+				counts[key] = (counts[key] or 0) + 1
+			end
+			for key, c in pairs(counts) do
+				lines[#lines + 1] = string.rep("  ", depth + 1) .. key .. " x" .. c
+			end
+			return
+		end
+		for _, k in ipairs(kids) do walk(k, depth + 1, maxDepth) end
+	end
+	for _, s in ipairs(SafeServices()) do
+		walk(s, 0, s.ClassName == "Workspace" and CONFIG.TreeWorkspaceDepth or CONFIG.TreeMaxDepth)
+	end
+	if CONFIG.NilInstances and Caps.getnilinstances then
+		lines[#lines + 1] = "<nil instances>"
+		pcall(function()
+			for _, i in ipairs(Caps.getnilinstances()) do walk(i, 1, 3) end
+		end)
+	end
+	Write("tree.txt", table.concat(lines, "\n"))
+	Status("RUNNING | tree.txt (" .. #lines .. " lines)")
+end)
+
+local Sources = {}
+local ScriptStats = { candidates = 0, decompiled = 0, bytecode = 0 }
 
 local Sig = {}
 local SigDirty = false
