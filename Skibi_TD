@@ -871,12 +871,13 @@ local mc = {
     replay = "Hybrid", selected = nil, map = nil,
     wave = 0, matchId = 0, ranMatch = nil, stepNo = 0,
     steps = {},
-    stamps = {place = {}, upgrade = {}, sell = {}, target = {}},
+    stamps = {place = {}, upgrade = {}, sell = {}, target = {}, autoab = {}},
     settle = {},
-    id2pos = {}, id2name = {}, id2lvl = {}, id2mode = {}, id2key = {}, id2at = {},
+    id2pos = {}, id2name = {}, id2lvl = {}, id2mode = {}, id2key = {}, id2at = {}, id2auto = {},
     k2id = {}, claim = {}, selfSell = {}, keyN = 0, hookMiss = false,
     waitPlace = nil, waitName = nil, waitPlaceId = nil, placeFail = nil, upFailAt = nil,
     book = {}, learned = false, finalSeen = false, initDone = false,
+    data = {}, model = {}, hookSeen = false, last = nil,
 }
 local MAC = UI.MakeStore("SkibiTD/Macros", "sk_mac_mem")
 local sanitize = UI.Sanitize
@@ -1040,10 +1041,11 @@ local function ensureSpeed()
     st.speedLast = os.clock()
     setSpeed(target)
 end
-local POS_EPS = 1.5
+local POS_EPS = 0.75
 local function forgetTower(id)
     mc.id2pos[id], mc.id2name[id], mc.id2lvl[id], mc.id2mode[id] = nil, nil, nil, nil
     mc.id2key[id], mc.id2at[id] = nil, nil
+    mc.data[id], mc.model[id] = nil, nil
     st.farms[id] = nil
 end
 local function idAt(p, name, skip)
@@ -1062,7 +1064,7 @@ local function ownCount()
     return n
 end
 local function clearStamps()
-    mc.stamps = {place = {}, upgrade = {}, sell = {}, target = {}}
+    mc.stamps = {place = {}, upgrade = {}, sell = {}, target = {}, autoab = {}}
     mc.settle = {}
 end
 local function resetRecorder()
@@ -1070,6 +1072,7 @@ local function resetRecorder()
     clearStamps()
     mc.id2key, mc.keyN = {}, 0
     mc.hookMiss = not mc.hook
+    mc.hookSeen = false
 end
 local function pushStep(s)
     local ts = s.ts or 0
@@ -1084,7 +1087,7 @@ local function takeStamp(kind, match)
         if now - list[i].ts > 10 then table.remove(list, i) end
     end
     local pickI, pickD
-    for i = #list, 1, -1 do
+    for i = 1, #list do
         local ok, d = match(list[i])
         if ok and (not pickD or d < pickD) then pickI, pickD = i, d end
     end
@@ -1093,6 +1096,10 @@ local function takeStamp(kind, match)
 end
 local function stamp(kind, e)
     local list = mc.stamps[kind]
+    mc.hookSeen = true
+    if kind == "place" or kind == "upgrade" then
+        for _, o in ipairs(mc.settle) do o.closed = true end
+    end
     if #list >= 48 then table.remove(list, 1) end
     local m = G.money()
     e.m, e.lo, e.w, e.wt, e.gt, e.ts = m, m, mc.wave, waveTime(), waveGameTime(), os.clock()
@@ -1106,19 +1113,19 @@ local function noteMoney()
         end
     end
     for _, e in ipairs(mc.settle) do
-        if v < e.lo then e.lo = v end
+        if not e.closed and v < e.lo then e.lo = v end
     end
 end
 local function tickStamps()
     local now = os.clock()
     for i = #mc.settle, 1, -1 do
         local e = mc.settle[i]
-        if now - e.ts > 1.2 then
+        if e.closed or now - e.ts > 0.9 then
             table.remove(mc.settle, i)
             local drop = e.m - e.lo
             local lone = true
             for _, o in ipairs(mc.steps) do
-                if o ~= e.step and o.ts and (o.t == "place" or o.t == "upgrade") and math.abs(o.ts - e.ts) < 0.9 then
+                if o ~= e.step and o.ts and (o.t == "place" or o.t == "upgrade") and math.abs(o.ts - e.ts) < 0.6 then
                     lone = false
                     break
                 end
@@ -1139,6 +1146,8 @@ local function recordStep(kind, key, pos, e, extra)
     s.rt = math.max(0, s.ts - (mc.recT0 or s.ts))
     for k, v in pairs(extra or {}) do s[k] = v end
     pushStep(s)
+    mc.last = string.format("%s %s%s", kind, tostring(extra and extra.n or key or ""), (extra and extra.lv) and (" Lv" .. extra.lv) or "")
+    print("[Skibi_TD] rec #" .. #mc.steps .. " " .. mc.last)
     if (kind == "place" or kind == "upgrade") and e and e.m then
         table.insert(mc.settle, {ts = e.ts, m = e.m, lo = e.lo or e.m, step = s})
     end
@@ -1290,6 +1299,7 @@ local function newMatch()
     mc.matchId = mc.matchId + 1
     mc.wave = 0
     mc.id2pos, mc.id2name, mc.id2lvl, mc.id2mode, mc.id2key, mc.id2at = {}, {}, {}, {}, {}, {}
+    mc.data, mc.model, mc.id2auto = {}, {}, {}
     mc.k2id, mc.claim, mc.selfSell, mc.book = {}, {}, {}, {}
     clearStamps()
     mc.waitPlace, mc.waitName, mc.waitPlaceId, mc.placeFail, mc.upFailAt = nil, nil, nil, nil, nil
@@ -1366,12 +1376,12 @@ local function onTowerLevel(id, data)
     local old = mc.id2lvl[id] or 0
     local new = tonumber(data:GetAttribute("Upgrade")) or old
     mc.id2lvl[id] = new
+    if new <= old then return end
     local key = mc.id2key[id]
-    if mc.rec and not mc.playing and key and new > old then
+    if not (mc.rec and not mc.playing and key) then return end
+    for lv = old + 1, new do
         local e = takeStamp("upgrade", function(o) return o.id == id, 0 end)
-        if e or mc.hookMiss then
-            recordStep("upgrade", key, mc.id2pos[id], e, {n = mc.id2name[id], lv = new})
-        end
+        recordStep("upgrade", key, mc.id2pos[id], e, {n = mc.id2name[id], lv = lv})
     end
 end
 local function onTowerMode(id, data)
@@ -1380,91 +1390,131 @@ local function onTowerMode(id, data)
     local new = data:GetAttribute("TargetMode")
     mc.id2mode[id] = new
     local key = mc.id2key[id]
-    if mc.rec and not mc.playing and key and new ~= nil and new ~= old then
-        local e = takeStamp("target", function(o) return o.id == id, 0 end)
-        local last = mc.steps[#mc.steps]
-        if last and last.t == "target" and last.k == key and os.clock() - (last.ts or 0) < 3 then
-            last.mode = new
-            last.ts = os.clock()
-        elseif e or mc.hookMiss then
-            recordStep("target", key, mc.id2pos[id], e, {mode = new})
-        end
+    if not (mc.rec and not mc.playing and key and new ~= nil and new ~= old) then return end
+    local e = takeStamp("target", function(o) return o.id == id, 0 end)
+    if not (e or not mc.hookSeen) then return end
+    local last = mc.steps[#mc.steps]
+    if last and last.t == "target" and last.k == key and os.clock() - (last.ts or 0) < 3 then
+        last.mode = new
+        last.ts = os.clock()
+    else
+        recordStep("target", key, mc.id2pos[id], e, {n = mc.id2name[id], mode = new})
     end
+end
+local function onAutoAbility(id, data)
+    if not mc.id2pos[id] then return end
+    local old = mc.id2auto[id] == true
+    local new = data:GetAttribute("AutoAbility") == true
+    mc.id2auto[id] = new
+    local key = mc.id2key[id]
+    if not (mc.rec and not mc.playing and key and new ~= old) then return end
+    local e = takeStamp("autoab", function(o) return o.id == id, 0 end)
+    if not (e or not mc.hookSeen) then return end
+    recordStep("autoab", key, mc.id2pos[id], e, {n = mc.id2name[id], v = new})
 end
 local function onTowerGone(id)
     if not mc.id2pos[id] then return end
     local pos, key = mc.id2pos[id], mc.id2key[id]
     if pos and key and mc.rec and not mc.playing and not mc.selfSell[id] then
         local e = takeStamp("sell", function(o) return o.id == id, 0 end)
-        if e then recordStep("sell", key, pos, e, {n = mc.id2name[id]}) end
+        if e or not mc.hookSeen then recordStep("sell", key, pos, e, {n = mc.id2name[id]}) end
     end
     mc.selfSell[id] = nil
     forgetTower(id)
 end
-local function onPlaceEcho(plr, name, _, guid)
+local function syncTowers()
+    for id, data in pairs(mc.data) do
+        if mc.id2pos[id] then
+            pcall(onTowerLevel, id, data)
+            pcall(onTowerMode, id, data)
+            pcall(onAutoAbility, id, data)
+        end
+    end
+    for id, obj in pairs(mc.model) do
+        if mc.id2pos[id] and obj.Parent == nil and os.clock() - (mc.id2at[id] or 0) > 1 then
+            pcall(onTowerGone, id)
+        end
+    end
+end
+local function onPlaceEcho(plr, name, cfArg, guid)
     if not alive() or guid == nil then return end
     if not (plr == lp or (typeof(plr) == "Instance" and plr:IsA("Player") and plr.UserId == lp.UserId)) then return end
-    local id = tostring(guid)
-    name = tostring(name)
+    local id, tname = tostring(guid), tostring(name)
+    if mc.id2pos[id] then return end
     local myMatch = mc.matchId
+    local cf = typeof(cfArg) == "CFrame" and cfArg or nil
+    local recording = mc.rec and not mc.playing
     local e
-    if mc.rec and not mc.playing then
+    if recording then
         e = takeStamp("place", function(o)
-            if o.n ~= name then return false end
-            return true, os.clock() - o.ts
+            if o.n ~= tname then return false end
+            if cf and typeof(o.cf) == "CFrame" then
+                local d = (o.cf.Position - cf.Position).Magnitude
+                if d < 12 then return true, d end
+            end
+            return true, 1000
         end)
     end
-    local pos
-    if mc.waitPlace and mc.waitName == name then
-        pos = mc.waitPlace
-        mc.waitPlaceId = id
-    elseif e and typeof(e.cf) == "CFrame" then
-        pos = e.cf.Position
+    local useCf = cf or (e and typeof(e.cf) == "CFrame" and e.cf) or nil
+    local waiting = mc.waitPlace and mc.waitName == tname
+        and (not useCf or (useCf.Position - mc.waitPlace).Magnitude < 12)
+    local pos = waiting and mc.waitPlace or (useCf and useCf.Position) or nil
+    local unresolved = pos == nil
+    pos = pos or Vector3.zero
+    if waiting then mc.waitPlaceId = id end
+    mc.id2pos[id], mc.id2name[id], mc.id2at[id] = pos, tname, os.clock()
+    mc.id2lvl[id], mc.id2mode[id], mc.id2auto[id] = 0, nil, false
+    if TD.isFarm(tname) then st.farms[id] = true end
+    local step
+    if recording then
+        if not e then mc.hookMiss = true end
+        mc.keyN = mc.keyN + 1
+        local key = "T" .. mc.keyN
+        mc.id2key[id] = key
+        step = recordStep("place", key, pos, e, {n = tname, cf = useCf and {useCf:GetComponents()} or nil})
     end
     task.spawn(function()
         local tf = G.towersFolder()
-        local model = tf and tf:WaitForChild(id, 5)
+        local model = tf and tf:WaitForChild(id, 6)
         local data
         local t0 = os.clock()
         repeat
             data = G.dataObj(id)
             if not data then task.wait(0.05) end
-        until data or os.clock() - t0 > 5 or not alive()
-        if not alive() or mc.matchId ~= myMatch then return end
-        if not pos then
-            local ok, pv = pcall(function() return model and model:GetPivot().Position end)
-            pos = ok and pv or Vector3.zero
+        until data or os.clock() - t0 > 6 or not alive()
+        if not alive() or mc.matchId ~= myMatch or not mc.id2pos[id] then return end
+        if unresolved and model then
+            local ok, pv = pcall(function() return model:GetPivot() end)
+            if ok and typeof(pv) == "CFrame" then
+                pos = pv.Position
+                mc.id2pos[id] = pos
+                if step then
+                    step.p = v2a(pos)
+                    step.cf = {pv:GetComponents()}
+                end
+            end
         end
-        for oid, p in pairs(mc.id2pos) do
-            if oid ~= id and (p - pos).Magnitude < 0.05 and not (tf and tf:FindFirstChild(oid)) then forgetTower(oid) end
+        local watch = model or data
+        if watch then
+            mc.model[id] = watch
+            watch.AncestryChanged:Connect(function(_, parent)
+                if alive() and parent == nil then onTowerGone(id) end
+            end)
         end
-        mc.id2pos[id] = pos
-        mc.id2name[id] = name
-        mc.id2at[id] = os.clock()
-        mc.id2lvl[id] = data and tonumber(data:GetAttribute("Upgrade")) or 0
-        mc.id2mode[id] = data and data:GetAttribute("TargetMode") or nil
-        if TD.isFarm(name) then st.farms[id] = true end
         if data then
+            mc.id2lvl[id] = tonumber(data:GetAttribute("Upgrade")) or 0
+            mc.id2mode[id] = data:GetAttribute("TargetMode")
+            mc.id2auto[id] = data:GetAttribute("AutoAbility") == true
+            mc.data[id] = data
             data:GetAttributeChangedSignal("Upgrade"):Connect(function()
                 if alive() then onTowerLevel(id, data) end
             end)
             data:GetAttributeChangedSignal("TargetMode"):Connect(function()
                 if alive() then onTowerMode(id, data) end
             end)
-        end
-        local watch = model or data
-        if watch then
-            watch.AncestryChanged:Connect(function(_, parent)
-                if alive() and parent == nil then onTowerGone(id) end
+            data:GetAttributeChangedSignal("AutoAbility"):Connect(function()
+                if alive() then onAutoAbility(id, data) end
             end)
-        end
-        if mc.rec and not mc.playing then
-            if not e then mc.hookMiss = true end
-            mc.keyN = mc.keyN + 1
-            local key = "T" .. mc.keyN
-            mc.id2key[id] = key
-            local cf = (e and typeof(e.cf) == "CFrame") and {e.cf:GetComponents()} or nil
-            recordStep("place", key, pos, e, {n = name, cf = cf})
         end
     end)
 end
@@ -1496,6 +1546,8 @@ local function onFire(kind, a, b, c)
         stamp("sell", {id = tostring(a)})
     elseif kind == "target" then
         stamp("target", {id = tostring(a)})
+    elseif kind == "autoab" then
+        stamp("autoab", {id = tostring(a)})
     elseif kind == "skip" then
         if not mc.rec or mc.wave < 1 then return end
         for i = #mc.steps, 1, -1 do
@@ -1540,7 +1592,7 @@ local function installHook()
         end
     end
     local remotes = {}
-    for kind, r in pairs({place = R.place, upgrade = R.upgrade, sell = R.sell, target = R.target, skip = R.skip, ability = R.ability}) do
+    for kind, r in pairs({place = R.place, upgrade = R.upgrade, sell = R.sell, target = R.target, skip = R.skip, ability = R.ability, autoab = R.autoab}) do
         remotes[r] = kind
     end
     router.hub = {mc = mc, remotes = remotes, onFire = onFire}
@@ -1753,6 +1805,19 @@ function MX.ability(s, myMatch)
     end
     return false
 end
+function MX.autoab(s, myMatch)
+    local id = stepId(s)
+    if not id or not R.autoab then return false end
+    local data = mc.data[id] or G.dataObj(id)
+    if not data then return false end
+    for _ = 1, 4 do
+        if not same(myMatch) or not mc.id2pos[id] then return false end
+        if (data:GetAttribute("AutoAbility") == true) == (s.v == true) then return true end
+        R.autoab:FireServer(id)
+        waitUntil(function() return (data:GetAttribute("AutoAbility") == true) == (s.v == true) end, ackWindow(), myMatch, 0.05)
+    end
+    return (data:GetAttribute("AutoAbility") == true) == (s.v == true)
+end
 function MX.skip(s, myMatch)
     if not R.skip or not same(myMatch) then return end
     local w = s.w or 0
@@ -1772,7 +1837,7 @@ local function gate(s, myMatch)
             return false
         end
     end
-    local strict = s.t == "sell" or s.t == "skip" or s.t == "ability"
+    local strict = s.t == "sell" or s.t == "skip" or s.t == "ability" or s.t == "autoab"
     if strict or timed or mode == "Hybrid" then
         local w = s.w or 0
         if w > 0 then
@@ -1821,6 +1886,8 @@ local function runPlayback(myMatch)
                 MX.skip(s, myMatch)
             elseif s.t == "ability" then
                 MX.ability(s, myMatch)
+            elseif s.t == "autoab" then
+                MX.autoab(s, myMatch)
             end
             task.wait()
         end
@@ -3035,6 +3102,7 @@ local function init()
     R.replay = ev:FindFirstChild("ReplayCore")
     R.stat = ev:WaitForChild("statUpdate", 15)
     R.ability = pathOf(RS, "TowerScript/spawnTowerAbility")
+    R.autoab = pathOf(RS, "TowerScript/toggleAutoAbility")
     R.speed = pathOf(RS, "Game/Speed/Change")
     R.ready = pathOf(RS, "GAME_START/readyButton")
     mc.ok = R.place ~= nil and R.upgrade ~= nil and R.sell ~= nil and R.target ~= nil and R.stat ~= nil
@@ -3102,6 +3170,7 @@ local function init()
             task.wait(0.1)
             n = n + 1
             pcall(tickStamps)
+            if n % 2 == 0 then pcall(syncTowers) end
             if cfg.autoSkip and R.skip and st.skipOpen and not mc.finalSeen and os.clock() >= st.skipAt then
                 if isBarrier(mc.wave) then
                     if st.limWave ~= mc.wave then
@@ -3150,8 +3219,9 @@ local function init()
                 elseif mc.rec then
                     line = "RECORDING"
                 end
-                macroStatus:SetText(string.format("steps <b>%d</b> | wave <b>%d</b> | $<b>%s</b>%s",
-                    #mc.steps, mc.wave, fmtMoney(G.money()), line and ("\n" .. line) or ""))
+                local lastEvt = (mc.rec and mc.last) and ("\nlast: " .. mc.last) or ""
+                macroStatus:SetText(string.format("steps <b>%d</b> | wave <b>%d</b> | $<b>%s</b>%s%s",
+                    #mc.steps, mc.wave, fmtMoney(G.money()), line and ("\n" .. line) or "", lastEvt))
             end
         end
     end)
