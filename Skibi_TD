@@ -1,3 +1,12 @@
+local function __say(msg, toast)
+    print("[Skibi_TD] " .. tostring(msg))
+    if toast then
+        pcall(function()
+            game:GetService("StarterGui"):SetCore("SendNotification", {Title = "Diamond Hub", Text = tostring(msg):sub(1, 180), Duration = 8})
+        end)
+    end
+end
+__say("starting", false)
 if not game:IsLoaded() then game.Loaded:Wait() end
 do
     local P = game:GetService("Players")
@@ -6,11 +15,10 @@ do
     local started = os.clock()
     local function ready()
         local char = lp.Character
-        return char ~= nil and char:FindFirstChild("HumanoidRootPart") ~= nil and lp:FindFirstChild("PlayerGui") ~= nil
+        return lp:FindFirstChild("PlayerGui") ~= nil
     end
     if not ready() then
         while not ready() and os.clock() - started < 30 do task.wait() end
-        task.wait(4)
     end
 end
 local __ok, __err = xpcall(function()
@@ -35,6 +43,7 @@ local DiamondUI = (function()
     local function fetch(file)
         local ok, res = pcall(function() return loadstring(game:HttpGet(REPO .. file))() end)
         if not ok or res == nil then
+            __say("could not download the UI library (" .. file .. "): " .. tostring(res), true)
             error("Obsidian: failed to load " .. file .. ": " .. tostring(res), 0)
         end
         return res
@@ -42,6 +51,7 @@ local DiamondUI = (function()
     local Library = fetch("Library.lua")
     local ThemeManager = fetch("addons/ThemeManager.lua")
     genv.__obsidian_lib = Library
+    __say("ui library loaded", false)
 
     Library:OnUnload(function()
         if genv.__obsidian_lib ~= Library then return end
@@ -770,7 +780,7 @@ do
     end
     if IN_LOBBY == nil then IN_LOBBY = game.PlaceId == LOBBY_ID end
 end
-local AE = {queued = false, file = "SkibidTD/_autoexec.txt"}
+local AE = {queued = false, file = "SkibiTD/_autoexec.txt"}
 AE.hasFS = type(writefile) == "function" and type(readfile) == "function" and type(isfile) == "function"
 function AE.get()
     if not AE.hasFS then return genv.sk_ae_flag == true end
@@ -781,8 +791,8 @@ function AE.set(on)
     genv.sk_ae_flag = on and true or false
     if not AE.hasFS then return end
     pcall(function()
-        if type(isfolder) == "function" and type(makefolder) == "function" and not isfolder("SkibidTD") then
-            makefolder("SkibidTD")
+        if type(isfolder) == "function" and type(makefolder) == "function" and not isfolder("SkibiTD") then
+            makefolder("SkibiTD")
         end
         writefile(AE.file, on and "1" or "0")
     end)
@@ -868,7 +878,7 @@ local mc = {
     waitPlace = nil, waitName = nil, waitPlaceId = nil, placeFail = nil, upFailAt = nil,
     book = {}, learned = false, finalSeen = false, initDone = false,
 }
-local MAC = UI.MakeStore("SkibidTD/Macros", "sk_mac_mem")
+local MAC = UI.MakeStore("SkibiTD/Macros", "sk_mac_mem")
 local sanitize = UI.Sanitize
 local Win
 local recToggle, playToggle, macroDD, nameInput, macroStatus, importName, importJson
@@ -2149,8 +2159,9 @@ function LB.init()
     end)
 end
 Win = UI:CreateWindow({
-    Title = "Diamond Hub", Subtitle = "Skibidi Tower Defense", ConfigFolder = "SkibidTD",
+    Title = "Diamond Hub", Subtitle = "Skibi Tower Defense", ConfigFolder = "SkibiTD",
 })
+__say("window created (" .. (IN_LOBBY and "lobby" or "match") .. ")", false)
 do
     local DISCORD_LINK = "https://discord.gg/U7U2GanMSW"
     local GREEN = Color3.fromRGB(70, 210, 130)
@@ -2186,7 +2197,7 @@ do
     end
     local function filesWork()
         return (pcall(function()
-            local dir = "SkibidTD"
+            local dir = "SkibiTD"
             if not isfolder(dir) then makefolder(dir) end
             local path = dir .. "/_check.txt"
             writefile(path, "ok")
@@ -3168,10 +3179,14 @@ else
     cfg.autoExecute = false
     UI.SetAutoExecuteToggle(false)
 end
+__say("ready", false)
 UI:Notify({Title = "Diamond Hub", Content = "Ready. RightShift hides the menu.", Duration = 4, Type = "Success"})
 task.delay(8, function() UI.__booting = false end)
 end, function(e)
     local tb = debug and debug.traceback
     return tb and tb(tostring(e), 2) or tostring(e)
 end)
-if not __ok then warn("[DiamondHub] startup error: " .. tostring(__err)) end
+if not __ok then
+    warn("[DiamondHub] startup error: " .. tostring(__err))
+    __say("startup error: " .. tostring(__err):match("^[^\n]*"), true)
+end
