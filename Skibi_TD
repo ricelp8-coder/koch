@@ -901,6 +901,7 @@ local function parseWave(txt)
 end
 local cfg = {
     autoStart = false,
+    hookRecord = false,
     autoSkip = false,
     autoSpeed = false,
     speed = 2,
@@ -923,7 +924,7 @@ local cfg = {
     autoExecute = false,
 }
 local st = {
-    farms = {}, skipOpen = false, skipAt = 0,
+    farms = {}, skipOpen = false, skipAt = 0, skipWave = nil,
     placeCur = nil, placeMax = nil,
     matchStart = nil, waveStart = nil, waveClock = nil,
     speedTries = 0, speedGaveUp = false, speedLast = 0,
@@ -941,7 +942,7 @@ local mc = {
     k2id = {}, claim = {}, selfSell = {}, keyN = 0, hookMiss = false,
     waitPlace = nil, waitName = nil, waitPlaceId = nil, placeFail = nil, upFailAt = nil,
     book = {}, learned = false, finalSeen = false, initDone = false,
-    data = {}, model = {}, hookSeen = false, last = nil,
+    data = {}, model = {}, hookSeen = false, last = nil, cashLog = {}, cashLast = nil, pend = {},
 }
 local MAC = UI.MakeStore("SkibiTD/Macros", "sk_mac_mem")
 local sanitize = UI.Sanitize
@@ -1363,14 +1364,14 @@ local function newMatch()
     mc.matchId = mc.matchId + 1
     mc.wave = 0
     mc.id2pos, mc.id2name, mc.id2lvl, mc.id2mode, mc.id2key, mc.id2at = {}, {}, {}, {}, {}, {}
-    mc.data, mc.model, mc.id2auto = {}, {}, {}
+    mc.data, mc.model, mc.id2auto, mc.pend = {}, {}, {}, {}
     mc.k2id, mc.claim, mc.selfSell, mc.book = {}, {}, {}, {}
     clearStamps()
     mc.waitPlace, mc.waitName, mc.waitPlaceId, mc.placeFail, mc.upFailAt = nil, nil, nil, nil, nil
     mc.spend, mc.nextAt = nil, nil
     mc.finalSeen = false
     st.farms, st.farmSoldMatch = {}, nil
-    st.skipOpen, st.matchStart, st.waveStart, st.waveClock = false, nil, nil, nil
+    st.skipOpen, st.skipWave, st.matchStart, st.waveStart, st.waveClock = false, nil, nil, nil, nil
     st.speedTries, st.speedGaveUp = 0, false
 end
 local function matchEnded()
@@ -1435,6 +1436,24 @@ local function onWave(n)
     end
     if n > mc.wave then waveStarted(n) end
 end
+local function skipBlocked()
+    if st.skipWave and st.skipWave < mc.wave then st.skipWave = nil end
+    return isBarrier(mc.wave) or (st.skipWave ~= nil and isBarrier(st.skipWave))
+end
+local function recordSkip()
+    if not (mc.rec and not mc.playing and mc.wave >= 1) then return end
+    for i = #mc.steps, 1, -1 do
+        local o = mc.steps[i]
+        if o.t == "skip" and o.w == mc.wave then return end
+    end
+    recordStep("skip", nil, Vector3.zero, nil, {})
+end
+local function refundNear(t)
+    for _, e in ipairs(mc.cashLog) do
+        if e.d > 0 and math.abs(e.t - t) <= 1 then return true end
+    end
+    return false
+end
 local function onTowerLevel(id, data)
     if not mc.id2pos[id] then return end
     local old = mc.id2lvl[id] or 0
@@ -1476,14 +1495,37 @@ local function onAutoAbility(id, data)
     if not (e or not mc.hookSeen) then return end
     recordStep("autoab", key, mc.id2pos[id], e, {n = mc.id2name[id], v = new})
 end
+local function resolveSale(p)
+    if p.done then return end
+    p.done = true
+    for i, o in ipairs(mc.pend) do
+        if o == p then table.remove(mc.pend, i) break end
+    end
+    if not (alive() and mc.rec and not mc.playing and mc.matchId == p.match) then return end
+    if refundNear(p.snap.ts) or (p.price ~= nil and p.price <= 0) then
+        recordStep("sell", p.key, p.pos, p.snap, {n = p.name})
+    end
+end
 local function onTowerGone(id)
     if not mc.id2pos[id] then return end
-    local pos, key = mc.id2pos[id], mc.id2key[id]
-    if pos and key and mc.rec and not mc.playing and not mc.selfSell[id] then
-        local e = takeStamp("sell", function(o) return o.id == id, 0 end)
-        if e or not mc.hookSeen then recordStep("sell", key, pos, e, {n = mc.id2name[id]}) end
-    end
+    local pos, key, name = mc.id2pos[id], mc.id2key[id], mc.id2name[id]
+    local mine = mc.selfSell[id]
+    local dataObj = mc.data[id]
+    local price = dataObj and tonumber(dataObj:GetAttribute("SellPrice")) or nil
     mc.selfSell[id] = nil
+    if pos and key and mc.rec and not mc.playing and not mine then
+        if mc.hookSeen then
+            local e = takeStamp("sell", function(o) return o.id == id, 0 end)
+            if e then recordStep("sell", key, pos, e, {n = name}) end
+        else
+            -- no hook: a sale pays the refund out, a tower the game removes does not
+            local m = G.money()
+            local snap = {m = m, lo = m, w = mc.wave, wt = waveTime(), gt = waveGameTime(), ts = os.clock()}
+            local p = {snap = snap, key = key, pos = pos, name = name, price = price, match = mc.matchId}
+            table.insert(mc.pend, p)
+            task.delay(1, function() resolveSale(p) end)
+        end
+    end
     forgetTower(id)
 end
 local function syncTowers()
@@ -1613,12 +1655,7 @@ local function onFire(kind, a, b, c)
     elseif kind == "autoab" then
         stamp("autoab", {id = tostring(a)})
     elseif kind == "skip" then
-        if not mc.rec or mc.wave < 1 then return end
-        for i = #mc.steps, 1, -1 do
-            local o = mc.steps[i]
-            if o.t == "skip" and o.w == mc.wave then return end
-        end
-        recordStep("skip", nil, Vector3.zero, nil, {})
+        recordSkip()
     elseif kind == "ability" then
         local id = tostring(a)
         local key, pos = mc.id2key[id], mc.id2pos[id]
@@ -1886,10 +1923,12 @@ function MX.skip(s, myMatch)
     if not R.skip or not same(myMatch) then return end
     local w = s.w or 0
     if w > 0 and mc.wave > w then return end
-    if cfg.autoSkip and not isBarrier(mc.wave) then return end
-    waitUntil(function() return st.skipOpen end, 20, myMatch, 0.1)
-    if not same(myMatch) then return end
-    pcall(function() R.skip:FireServer(true) end)
+    if cfg.autoSkip and not skipBlocked() then return end
+    local base, t0 = mc.wave, os.clock()
+    while same(myMatch) and mc.wave <= base and os.clock() - t0 < 20 do
+        pcall(function() R.skip:FireServer(true) end)
+        if not sleep(0.25, myMatch) then return end
+    end
 end
 local function gate(s, myMatch)
     local mode = mc.replay
@@ -2155,6 +2194,7 @@ local function mapGate()
 end
 finishRecording = function(why)
     if not mc.rec then return end
+    for _, p in ipairs({table.unpack(mc.pend)}) do resolveSale(p) end
     clearStamps()
     mc.rec = false
     syncToggles()
@@ -2662,9 +2702,14 @@ recToggle = recGrid:AddToggle({
                 recToggle:Set(false, true)
                 return
             end
-            if mc.hook then mc.hook = installHook() end
-            if not mc.hook then
-                flash("No hookmetamethod: steps come from server echoes, skips and abilities are not recorded", "Warning")
+            local router = genv.sk_router
+            if cfg.hookRecord then
+                if mc.hook then mc.hook = installHook() end
+                if not mc.hook then
+                    flash("No hookmetamethod: recording without the hook", "Warning")
+                end
+            elseif router then
+                router.hub = nil
             end
             resetRecorder()
             mc.map = G.chapter()
@@ -2724,6 +2769,11 @@ recSec:AddToggle({
     Name = "Auto Save After The Match Ends", Flag = "autoSaveRec", Default = true,
     Tooltip = "Saves the recording by itself when the round ends. When off, the steps stay loaded and you save them with the Save button",
     Callback = function(v) mc.autoSave = v end,
+})
+recSec:AddToggle({
+    Name = "Hook Recording (risky)", Flag = "hookRecord",
+    Tooltip = "Off (safe): steps come from what the server confirms, skips from the Y key / Yes button, abilities are not recorded. On: also hooks the game's remote calls to record abilities and exact timing. The game has a namecall detector and can kick you for it",
+    Callback = function(v) cfg.hookRecord = v end,
 })
 macroStatus = recSec:AddLabel({Text = "steps <b>0</b> | wave <b>0</b> | $<b>0</b>"})
 recSec:AddButton({
@@ -3491,16 +3541,44 @@ local function init()
         end)
     end
     if R.skip then
-        R.skip.OnClientEvent:Connect(function(_, open)
+        R.skip.OnClientEvent:Connect(function(wave, open)
             st.skipOpen = open == true
-            if st.skipOpen then st.skipAt = os.clock() + 0.15 end
+            if tonumber(wave) then st.skipWave = tonumber(wave) end
+            if cfg.autoSkip and not mc.finalSeen and not skipBlocked() then
+                pcall(function() R.skip:FireServer(true) end)
+            end
         end)
     end
     local note = RS:FindFirstChild("Notification")
     if note and note:IsA("BindableEvent") then note.Event:Connect(onNotify) end
+    mc.cashLast = G.money()
     lp:GetAttributeChangedSignal("Cash"):Connect(function()
-        if alive() and mc.rec then noteMoney() end
+        if not alive() then return end
+        local v = G.money()
+        local d = v - (mc.cashLast or v)
+        mc.cashLast = v
+        if d ~= 0 then
+            local log = mc.cashLog
+            log[#log + 1] = {t = os.clock(), d = d}
+            if #log > 30 then table.remove(log, 1) end
+        end
+        if mc.rec then noteMoney() end
     end)
+    local UIS = game:GetService("UserInputService")
+    UIS.InputBegan:Connect(function(input, processed)
+        if not alive() or processed then return end
+        if input.KeyCode == Enum.KeyCode.Y and st.skipOpen then recordSkip() end
+    end)
+    do
+        local sw = pg:FindFirstChild("skipWave")
+        local yes = sw and pathOf(sw, "Frame/Y")
+        if yes then
+            yes.MouseButton1Click:Connect(function()
+                local cur, fin = RS:FindFirstChild("CurrentEnemies"), RS:FindFirstChild("FinalEnemies")
+                if alive() and cur and fin and cur.Value - fin.Value / 2 < 1 then recordSkip() end
+            end)
+        end
+    end
     local endedVal = RS:FindFirstChild("ended")
     if endedVal then
         endedVal.Changed:Connect(function()
@@ -3524,14 +3602,15 @@ local function init()
             n = n + 1
             pcall(tickStamps)
             if n % 2 == 0 then pcall(syncTowers) end
-            if cfg.autoSkip and R.skip and st.skipOpen and not mc.finalSeen and os.clock() >= st.skipAt then
-                if isBarrier(mc.wave) then
+            if cfg.autoSkip and R.skip and mc.wave >= 1 and G.started() and not G.ended() and not mc.finalSeen
+                and os.clock() >= st.skipAt then
+                if skipBlocked() then
                     if st.limWave ~= mc.wave then
                         st.limWave = mc.wave
                         flash("Auto Skip paused: barrier on wave " .. mc.wave, "Warning")
                     end
                 else
-                    st.skipAt = os.clock() + 2
+                    st.skipAt = os.clock() + 0.2
                     pcall(function() R.skip:FireServer(true) end)
                 end
             end
