@@ -1,0 +1,397 @@
+if not game:IsLoaded() then game.Loaded:Wait() end
+local env = (getgenv and getgenv()) or _G
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+while not Players.LocalPlayer do task.wait() end
+local LocalPlayer = Players.LocalPlayer
+
+if env.__RemoteLog and env.__RemoteLog.Destroy then
+	pcall(env.__RemoteLog.Destroy)
+end
+
+local MAX_STORED = 500
+local MAX_SHOWN = 120
+local MAX_ARG_CHARS = 500
+
+local State = { Active = true, Paused = false, Incoming = false, Entries = {}, Dirty = false, Ignore = {} }
+env.__RemoteLog = State
+
+local NAVY = Color3.fromHex("0d1228")
+local ACCENT = Color3.fromHex("3d6bff")
+local OUTLINE = Color3.fromHex("1b2554")
+local TEXT = Color3.fromHex("eef2ff")
+
+local function InstancePath(inst)
+	local names = {}
+	local cur = inst
+	while cur and cur ~= game do
+		table.insert(names, 1, cur)
+		cur = cur.Parent
+	end
+	if cur ~= game then
+		return "<" .. inst.ClassName .. " " .. inst.Name .. " (no parent)>"
+	end
+	local out = "game"
+	for _, i in ipairs(names) do
+		local name = i.Name
+		if name:match("^[%a_][%w_]*$") then
+			out = out .. "." .. name
+		else
+			out = out .. "[" .. string.format("%q", name) .. "]"
+		end
+	end
+	return out
+end
+
+local function Ser(v, depth)
+	local t = typeof(v)
+	if t == "string" then
+		if #v > 150 then v = v:sub(1, 150) .. "..." end
+		return string.format("%q", v)
+	elseif t == "number" or t == "boolean" or t == "nil" then
+		return tostring(v)
+	elseif t == "Instance" then
+		return InstancePath(v)
+	elseif t == "Vector3" then
+		return string.format("Vector3.new(%s, %s, %s)", v.X, v.Y, v.Z)
+	elseif t == "Vector2" then
+		return string.format("Vector2.new(%s, %s)", v.X, v.Y)
+	elseif t == "CFrame" then
+		return "CFrame.new(" .. table.concat({ v:GetComponents() }, ", ") .. ")"
+	elseif t == "Color3" then
+		return string.format("Color3.new(%s, %s, %s)", v.R, v.G, v.B)
+	elseif t == "EnumItem" then
+		return tostring(v)
+	elseif t == "buffer" then
+		return "buffer(" .. buffer.len(v) .. ")"
+	elseif t == "table" then
+		if depth >= 3 then return "{...}" end
+		local parts, n = {}, 0
+		local len = #v
+		for i = 1, len do
+			n += 1
+			if n > 40 then parts[#parts + 1] = "..." return "{" .. table.concat(parts, ", ") .. "}" end
+			parts[#parts + 1] = Ser(v[i], depth + 1)
+		end
+		for k, x in pairs(v) do
+			if not (type(k) == "number" and k >= 1 and k <= len and math.floor(k) == k) then
+				n += 1
+				if n > 40 then parts[#parts + 1] = "..." break end
+				local key = (type(k) == "string" and k:match("^[%a_][%w_]*$")) and k or ("[" .. Ser(k, depth + 1) .. "]")
+				parts[#parts + 1] = key .. " = " .. Ser(x, depth + 1)
+			end
+		end
+		return "{" .. table.concat(parts, ", ") .. "}"
+	elseif t == "function" then
+		return "function"
+	end
+	return t .. ":" .. tostring(v)
+end
+
+local function SerArgs(...)
+	local n = select("#", ...)
+	local out = {}
+	for i = 1, n do
+		local ok, s = pcall(Ser, (select(i, ...)), 0)
+		out[i] = ok and s or "?"
+	end
+	local text = table.concat(out, ", ")
+	if #text > MAX_ARG_CHARS then text = text:sub(1, MAX_ARG_CHARS) .. "..." end
+	return text
+end
+
+local function Ignored(remote)
+	return State.Ignore[string.lower(remote.Name)] == true
+end
+
+local function AddEntry(direction, remote, method, caller, ...)
+	if not State.Active or State.Paused then return end
+	if Ignored(remote) then return end
+	local call = string.format("%s:%s(%s)", InstancePath(remote), method, SerArgs(...))
+	local from = caller or ""
+	local last = State.Entries[#State.Entries]
+	if last and last.call == call and last.from == from and last.direction == direction then
+		last.count += 1
+		last.time = os.date("%H:%M:%S")
+	else
+		State.Entries[#State.Entries + 1] = { direction = direction, call = call, from = from, count = 1, time = os.date("%H:%M:%S") }
+		if #State.Entries > MAX_STORED then table.remove(State.Entries, 1) end
+	end
+	State.Dirty = true
+end
+
+local function EntryText(e)
+	local line = string.format("[%s] %s%s%s", e.time, e.direction == "in" and "IN  " or "", e.call, e.count > 1 and ("   x" .. e.count) or "")
+	if e.from ~= "" then line = line .. "\n    from: " .. e.from end
+	return line
+end
+
+local function FullText()
+	local lines = {}
+	for i, e in ipairs(State.Entries) do lines[i] = EntryText(e) end
+	return table.concat(lines, "\n")
+end
+
+local REMOTE = { RemoteEvent = true, RemoteFunction = true, UnreliableRemoteEvent = true }
+local HookReady = false
+if hookmetamethod and getnamecallmethod and newcclosure then
+	if not env.__RemoteLogHooked then
+		local old
+		local ok = pcall(function()
+			old = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+				local sink = env.__RemoteLog
+				if sink and sink.Active then
+					local method = getnamecallmethod()
+					if (method == "FireServer" or method == "InvokeServer") and typeof(self) == "Instance" and REMOTE[self.ClassName]
+						and not (checkcaller and checkcaller()) then
+						local caller = getcallingscript and getcallingscript()
+						local callerName = ""
+						if caller then
+							local okC, n = pcall(function() return caller:GetFullName() end)
+							callerName = okC and n or ""
+						end
+						pcall(sink.OnCall, "out", self, method, callerName, ...)
+					end
+				end
+				return old(self, ...)
+			end))
+		end)
+		env.__RemoteLogHooked = ok
+	end
+	HookReady = env.__RemoteLogHooked == true
+end
+State.OnCall = AddEntry
+
+local Gui = Instance.new("ScreenGui")
+Gui.Name = tostring(math.random(100000, 999999))
+Gui.ResetOnSpawn = false
+Gui.DisplayOrder = 100000
+Gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+local parented = false
+if gethui then parented = pcall(function() Gui.Parent = gethui() end) end
+if not parented then parented = pcall(function() Gui.Parent = game:GetService("CoreGui") end) end
+if not parented then Gui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+
+local function Corner(o, r)
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, r or 8)
+	c.Parent = o
+end
+local function Stroke(o, color)
+	local s = Instance.new("UIStroke")
+	s.Color = color or OUTLINE
+	s.Thickness = 1.5
+	s.Parent = o
+end
+
+local Window = Instance.new("Frame")
+Window.Size = UDim2.fromOffset(440, 320)
+Window.Position = UDim2.new(0.5, -220, 0.25, 0)
+Window.BackgroundColor3 = NAVY
+Window.BackgroundTransparency = 0.05
+Window.Active = true
+Window.Parent = Gui
+Corner(Window, 10)
+Stroke(Window, ACCENT)
+
+local Title = Instance.new("TextLabel")
+Title.BackgroundTransparency = 1
+Title.Position = UDim2.fromOffset(10, 0)
+Title.Size = UDim2.fromOffset(100, 34)
+Title.Font = Enum.Font.GothamBold
+Title.Text = "Remote Log"
+Title.TextColor3 = TEXT
+Title.TextSize = 14
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = Window
+
+local function Button(text, x, w)
+	local b = Instance.new("TextButton")
+	b.Position = UDim2.fromOffset(x, 4)
+	b.Size = UDim2.fromOffset(w, 26)
+	b.BackgroundColor3 = OUTLINE
+	b.AutoButtonColor = true
+	b.Font = Enum.Font.GothamBold
+	b.Text = text
+	b.TextColor3 = TEXT
+	b.TextSize = 12
+	b.Parent = Window
+	Corner(b, 6)
+	return b
+end
+
+local CopyButton = Button("Copy", 112, 58)
+local ClearButton = Button("Clear", 174, 58)
+local HideButton = Button("Hide", 236, 58)
+local PauseButton = Button("Pause", 298, 62)
+local InButton = Button("In: off", 364, 70)
+
+local IgnoreBox = Instance.new("TextBox")
+IgnoreBox.Position = UDim2.fromOffset(8, 38)
+IgnoreBox.Size = UDim2.new(1, -16, 0, 26)
+IgnoreBox.BackgroundColor3 = OUTLINE
+IgnoreBox.Font = Enum.Font.Code
+IgnoreBox.PlaceholderText = "ignore remote names, comma separated"
+IgnoreBox.PlaceholderColor3 = Color3.fromHex("7f88b0")
+IgnoreBox.Text = ""
+IgnoreBox.TextColor3 = TEXT
+IgnoreBox.TextSize = 13
+IgnoreBox.ClearTextOnFocus = false
+IgnoreBox.TextXAlignment = Enum.TextXAlignment.Left
+IgnoreBox.Parent = Window
+Corner(IgnoreBox, 6)
+
+local Scroll = Instance.new("ScrollingFrame")
+Scroll.Position = UDim2.fromOffset(8, 70)
+Scroll.Size = UDim2.new(1, -16, 1, -78)
+Scroll.BackgroundColor3 = Color3.fromHex("070a16")
+Scroll.BorderSizePixel = 0
+Scroll.ScrollBarThickness = 6
+Scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+Scroll.CanvasSize = UDim2.new()
+Scroll.Parent = Window
+Corner(Scroll, 6)
+
+local Log = Instance.new("TextBox")
+Log.Size = UDim2.new(1, -8, 0, 0)
+Log.AutomaticSize = Enum.AutomaticSize.Y
+Log.BackgroundTransparency = 1
+Log.Font = Enum.Font.Code
+Log.MultiLine = true
+Log.TextEditable = false
+Log.ClearTextOnFocus = false
+Log.TextWrapped = true
+Log.TextSize = 12
+Log.TextColor3 = TEXT
+Log.TextXAlignment = Enum.TextXAlignment.Left
+Log.TextYAlignment = Enum.TextYAlignment.Top
+Log.Text = HookReady and "waiting for remote calls..." or "hookmetamethod is not supported here: only incoming remotes (In button) can be logged"
+Log.Parent = Scroll
+
+local Mini = Instance.new("TextButton")
+Mini.Size = UDim2.fromOffset(64, 30)
+Mini.Position = UDim2.new(0, 12, 0.4, 0)
+Mini.BackgroundColor3 = NAVY
+Mini.Font = Enum.Font.GothamBold
+Mini.Text = "Log"
+Mini.TextColor3 = TEXT
+Mini.TextSize = 13
+Mini.Visible = false
+Mini.Parent = Gui
+Corner(Mini, 8)
+Stroke(Mini, ACCENT)
+
+local dragging, dragStart, startPos
+Title.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		dragging = input
+		dragStart = input.Position
+		startPos = Window.Position
+	end
+end)
+local MoveConn = UIS.InputChanged:Connect(function(input)
+	if dragging and (input == dragging or input.UserInputType == Enum.UserInputType.MouseMovement) then
+		local d = input.Position - dragStart
+		Window.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+	end
+end)
+local EndConn = UIS.InputEnded:Connect(function(input)
+	if input == dragging or (dragging and input.UserInputType == Enum.UserInputType.MouseButton1) then dragging = nil end
+end)
+
+local function Flash(button, text)
+	local old = button.Text
+	button.Text = text
+	task.delay(1.2, function()
+		if button.Parent then button.Text = old end
+	end)
+end
+
+CopyButton.MouseButton1Click:Connect(function()
+	local clip = setclipboard or toclipboard or (Clipboard and Clipboard.set)
+	if clip and pcall(clip, FullText()) then
+		Flash(CopyButton, "Copied")
+	else
+		Flash(CopyButton, "No clip")
+	end
+end)
+
+ClearButton.MouseButton1Click:Connect(function()
+	table.clear(State.Entries)
+	State.Dirty = true
+	Log.Text = ""
+end)
+
+HideButton.MouseButton1Click:Connect(function()
+	Window.Visible = false
+	Mini.Visible = true
+end)
+Mini.MouseButton1Click:Connect(function()
+	Window.Visible = true
+	Mini.Visible = false
+end)
+
+PauseButton.MouseButton1Click:Connect(function()
+	State.Paused = not State.Paused
+	PauseButton.Text = State.Paused and "Resume" or "Pause"
+	PauseButton.BackgroundColor3 = State.Paused and ACCENT or OUTLINE
+end)
+
+local Watched = {}
+local function Watch(r)
+	if Watched[r] or r:IsA("RemoteFunction") then return end
+	Watched[r] = true
+	r.OnClientEvent:Connect(function(...)
+		if State.Incoming then pcall(AddEntry, "in", r, "OnClientEvent", "", ...) end
+	end)
+end
+local IncomingReady = false
+InButton.MouseButton1Click:Connect(function()
+	State.Incoming = not State.Incoming
+	InButton.Text = State.Incoming and "In: on" or "In: off"
+	InButton.BackgroundColor3 = State.Incoming and ACCENT or OUTLINE
+	if State.Incoming and not IncomingReady then
+		IncomingReady = true
+		for _, d in ipairs(game:GetDescendants()) do
+			if REMOTE[d.ClassName] then pcall(Watch, d) end
+		end
+		State.AddedConn = game.DescendantAdded:Connect(function(d)
+			if REMOTE[d.ClassName] then pcall(Watch, d) end
+		end)
+	end
+end)
+
+IgnoreBox.FocusLost:Connect(function()
+	table.clear(State.Ignore)
+	for name in IgnoreBox.Text:gmatch("[^,]+") do
+		name = name:match("^%s*(.-)%s*$")
+		if name ~= "" then State.Ignore[string.lower(name)] = true end
+	end
+end)
+
+task.spawn(function()
+	while State.Active do
+		task.wait(0.2)
+		if State.Dirty then
+			State.Dirty = false
+			local atBottom = Scroll.CanvasPosition.Y >= Scroll.AbsoluteCanvasSize.Y - Scroll.AbsoluteSize.Y - 30
+			local lines = {}
+			local first = math.max(1, #State.Entries - MAX_SHOWN + 1)
+			for i = first, #State.Entries do lines[#lines + 1] = EntryText(State.Entries[i]) end
+			Log.Text = table.concat(lines, "\n")
+			if atBottom then
+				task.defer(function()
+					Scroll.CanvasPosition = Vector2.new(0, Scroll.AbsoluteCanvasSize.Y)
+				end)
+			end
+		end
+	end
+end)
+
+State.Destroy = function()
+	State.Active = false
+	if State.AddedConn then State.AddedConn:Disconnect() end
+	MoveConn:Disconnect()
+	EndConn:Disconnect()
+	Gui:Destroy()
+end
