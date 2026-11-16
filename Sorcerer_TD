@@ -836,14 +836,27 @@ for i, c in ipairs(SUMMON_CRATES) do
     SUMMON_BY_LABEL[c.label] = c
     SUMMON_LABELS[i] = c.label
 end
+local function parseBarriers(txt)
+    local set, list = {}, {}
+    for num in tostring(txt or ""):gmatch("%d+") do
+        local n = tonumber(num)
+        if n and n > 0 and n <= 9999 and not set[n] then
+            set[n] = true
+            list[#list + 1] = n
+        end
+    end
+    table.sort(list)
+    return set, list
+end
 local function parseWave(txt)
     local n = tonumber(tostring(txt or ""):match("%d+"))
     if n and n > 0 and n <= 9999 then return n end
     return 0
 end
 local cfg = {
-    autoVote = false,
-    voteChoice = "",
+    autoSkip = false,
+    skipBarriers = {},
+    skipDelay = 0,
     endAction = "None",
     autoExecute = false,
     autoSellFarm = false,
@@ -872,7 +885,7 @@ local cfg = {
 }
 local st = {
     waveStart = nil, matchStart = nil, matchMode = nil,
-    inVote = false, voted = false, voteTries = 0, voteLast = 0, voteWarned = false,
+    skipAt = 0, skipTries = 0, skipWindow = false, skipWave = nil,
     finalShown = false, farmSoldMatch = nil, bootAt = os.clock(),
 }
 local R = {}
@@ -892,7 +905,8 @@ local sanitize = UI.Sanitize
 local Win
 local recToggle, playToggle, macroDD, nameInput, macroStatus, importName, importJson
 local finishRecording
-local sellFarmInput, voteInput
+local sellFarmInput, skipBarrierInput
+local barrierTxt
 UI.__booting = true
 local function flash(t, kind)
     if UI.__booting then return end
@@ -1744,8 +1758,9 @@ function TR.at(pos, name, skip)
     local best, bestD, bestE
     for m, e in pairs(mc.reg) do
         if TR.live(e, m) and not (skip and skip[m]) and (not name or e.name == name) then
+            e.pos = TW.pos(m) or e.pos
             local d = xzDist(e.pos, pos)
-            if d < 1.0 and math.abs(e.pos.Y - pos.Y) < 8 and (not bestD or d < bestD) then
+            if d < 1.5 and math.abs(e.pos.Y - pos.Y) < 12 and (not bestD or d < bestD) then
                 best, bestD, bestE = m, d, e
             end
         end
@@ -1759,7 +1774,7 @@ function TR.add(m)
     local base, lv = TW.base(m.Name), TW.level(m.Name)
     local oldM, oldE
     for om, e in pairs(mc.reg) do
-        if om ~= m and e.name == base and xzDist(e.pos, pos) < 0.75 and math.abs(e.pos.Y - pos.Y) < 8 then
+        if om ~= m and e.name == base and xzDist(TW.pos(om) or e.pos, pos) < 1.0 and math.abs(e.pos.Y - pos.Y) < 12 then
             oldM, oldE = om, e
             break
         end
@@ -1801,7 +1816,17 @@ function TR.consider(m)
         local c = m:FindFirstChild("Config")
         local o = c and c:FindFirstChild("Owner")
         if o and o.Value ~= "" and o.Value ~= nil then
-            if o.Value == lp.Name then TR.add(m) end
+            if o.Value == lp.Name then
+                local last, same_ = nil, 0
+                local t1 = os.clock()
+                while alive() and m.Parent and os.clock() - t1 < 1.5 and same_ < 3 do
+                    local p = TW.pos(m)
+                    if p and last and (p - last).Magnitude < 0.01 then same_ = same_ + 1 else same_ = 0 end
+                    last = p
+                    task.wait(0.05)
+                end
+                if m.Parent then TR.add(m) end
+            end
             return
         end
         if os.clock() - t0 > 4 then return end
@@ -1887,7 +1912,7 @@ function MT.newMatch()
     mc.claim, mc.k2pos, mc.spend, mc.nextAt = {}, {}, nil, 0
     mc.finalSeen = false
     st.farmSoldMatch, st.waveStart, st.matchStart, st.matchMode = nil, nil, nil, nil
-    st.voted, st.voteTries, st.voteWarned = false, 0, false
+    st.skipWindow, st.skipTries = false, 0
     if MT.endReset then MT.endReset() end
     if mc.rec then
         mc.rec = false
@@ -1924,55 +1949,44 @@ function MT.skipAvailable()
     local btn = g and path(g, "Info/SkipBtn")
     return btn ~= nil and visible(btn)
 end
-function MT.voteButtons()
-    local g = gameGui()
-    local v = g and g:FindFirstChild("Voting")
-    local d = v and v:FindFirstChild("Diffs")
-    local out = {}
-    if d then
-        for _, c in ipairs(d:GetChildren()) do
-            if c:IsA("ImageButton") or c:IsA("TextButton") then out[#out + 1] = c end
-        end
+function MT.isBarrier(w)
+    local txt = skipBarrierInput and skipBarrierInput:Get()
+    if txt ~= nil and txt ~= barrierTxt then
+        barrierTxt = txt
+        cfg.skipBarriers = (parseBarriers(txt))
     end
-    table.sort(out, function(a, b)
-        if a.LayoutOrder ~= b.LayoutOrder then return a.LayoutOrder < b.LayoutOrder end
-        return a.Name < b.Name
-    end)
-    return out
+    return cfg.skipBarriers[w] == true
 end
-function MT.pickVote(buttons)
-    local want = normMap(cfg.voteChoice)
-    if want ~= "" then
-        for _, b in ipairs(buttons) do
-            if normMap(b.Name) == want then return b end
-        end
-        for _, b in ipairs(buttons) do
-            if normMap(b.Name):find(want, 1, true) then return b end
-        end
+function MT.fireSkip()
+    if not R.VoteSkip then return false end
+    return (pcall(function() R.VoteSkip:FireServer() end))
+end
+function MT.trySkip()
+    if not (cfg.autoSkip and R.VoteSkip) or mc.finalSeen then return end
+    local avail = MT.skipAvailable()
+    if not avail then
+        st.skipWindow, st.skipTries = false, 0
+        return
     end
-    return buttons[1], want ~= ""
-end
-function MT.voteStep()
-    if not (cfg.autoVote and R.VoteForMap) then return end
+    local w = INFO.wave()
+    if MT.isBarrier(w) then
+        if st.skipWarnMatch ~= mc.matchId or st.skipWarnWave ~= w then
+            st.skipWarnMatch, st.skipWarnWave = mc.matchId, w
+            flash("Auto Skip paused: barrier on wave " .. w, "Warning")
+        end
+        return
+    end
     local now = os.clock()
-    if st.voted and (st.voteTries >= 3 or now - st.voteLast < 1.5) then return end
-    local buttons = MT.voteButtons()
-    if #buttons == 0 then return end
-    local btn, missed = MT.pickVote(buttons)
-    if missed and not st.voteWarned then
-        st.voteWarned = true
-        local names = {}
-        for _, b in ipairs(buttons) do names[#names + 1] = b.Name end
-        flash("Auto Vote: no option named '" .. tostring(cfg.voteChoice) .. "', voting " .. btn.Name
-            .. " (options: " .. table.concat(names, ", ") .. ")", "Warning")
+    if not st.skipWindow then
+        st.skipWindow, st.skipTries, st.skipAt = true, 0, 0
+        st.skipReady = now
     end
-    st.voted = true
-    st.voteTries = st.voteTries + 1
-    st.voteLast = now
-    st.matchMode = btn.Name
-    pcall(function() R.VoteForMap:FireServer(btn.Name) end)
+    if st.skipTries >= 3 or now - st.skipAt < 3 then return end
+    if now - st.skipReady < (tonumber(cfg.skipDelay) or 0) then return end
+    st.skipTries = st.skipTries + 1
+    st.skipAt = now
+    MT.fireSkip()
 end
-
 local WH = {url = "", enabled = false, onEnd = true, image = "", icon = "", busy = false,
     defaultImage = "https://cdn.discordapp.com/attachments/1562919492181565470/1569079932632699072/38a64fd5-21f2-4853-b1cd-1d5f4de25cd9.jpg?ex=6af22710&is=6af0d590&hm=09323bd2aa4b77efb31d126acb517f66850d2290a2b6dbe8e0b4201d83fb9d56&",
     defaultIcon = "https://cdn.discordapp.com/attachments/1562919492181565470/1569081973874495648/IMG_20261029_225652_662.jpg?ex=6af228f6&is=6af0d776&hm=572c30860c06acb0182f35cdae5aa9e6e740afaea76246cd345ffa20b213566d&"}
@@ -2360,13 +2374,21 @@ mc.cb.place = function(m, e)
         if o.n and o.n ~= e.name then return false end
         return true, d
     end)
+    if not stamp then
+        stamp = takeStamp("Spawn", function(o)
+            if o.n and o.n ~= e.name then return false end
+            if os.clock() - o.ts > 5 then return false end
+            return true, os.clock() - o.ts
+        end)
+    end
     if not stamp then mc.hookMiss = true end
     mc.keyN = mc.keyN + 1
     e.key = "T" .. mc.keyN
+    if stamp and stamp.pos then e.pos = e.pos or stamp.pos end
     local extra = {n = e.name, u = stamp and stamp.u, c = TW.placePrice(e.name, stamp and stamp.u)}
     if stamp and stamp.cf then extra.cf = {stamp.cf:GetComponents()} end
     if stamp and stamp.bk then extra.bk = keyOf(stamp.bk) end
-    recordStep("place", e.key, e.pos, stamp, extra)
+    recordStep("place", e.key, (stamp and stamp.pos) or e.pos, stamp, extra)
 end
 mc.cb.upgrade = function(m, e, old)
     if not (recording() and e.key) then return end
@@ -2518,6 +2540,15 @@ function MX.find(s)
     if not m and s.n then m, e = TR.at(pos) end
     return m, e
 end
+function MX.findWait(s, myMatch, timeout)
+    local m, e = MX.find(s)
+    if m then return m, e end
+    waitUntil(function()
+        m, e = MX.find(s)
+        return m ~= nil
+    end, timeout or 2.5, myMatch, 0.05)
+    return m, e
+end
 function MX.unit(name, saved)
     local data = DATA.get()
     local pick
@@ -2584,6 +2615,7 @@ function MX.place(s, myMatch)
         local buffed = s.bk and MX.byKey(s.bk) or nil
         local before = money()
         local placed = false
+        local calledAt = os.clock()
         if MT.invoke(R.Request, s.n, nil, nil, buffed, uuid) then
             placed = MT.invoke(R.Spawn, uuid, cf, buffed) and true or false
         end
@@ -2594,11 +2626,23 @@ function MX.place(s, myMatch)
             waitUntil(function()
                 nm, ne = TR.at(cf.Position, s.n, mc.claim)
                 if not nm then nm, ne = TR.at(p, s.n, mc.claim) end
+                if not nm then
+                    for m3, e3 in pairs(mc.reg) do
+                        if TR.live(e3, m3) and e3.name == s.n and not mc.claim[m3] and e3.at >= calledAt - 0.2 then
+                            nm, ne = m3, e3
+                        end
+                    end
+                end
                 return nm ~= nil
             end, 3.5, myMatch, 0.03)
             if nm then
                 mc.claim[nm] = true
-                if s.k then mc.k2pos[s.k] = ne.pos end
+                local live = TW.pos(nm) or ne.pos
+                if s.k then mc.k2pos[s.k] = live end
+                if xzDist(live, cf.Position) > 2.5 then
+                    warn(string.format("[sd] %s placed at %.1f,%.1f,%.1f but the recorded position is %.1f,%.1f,%.1f",
+                        tostring(s.n), live.X, live.Y, live.Z, cf.Position.X, cf.Position.Y, cf.Position.Z))
+                end
                 return true, nm
             end
             attempts = attempts + 1
@@ -2627,7 +2671,7 @@ function MX.upgrade(s, myMatch)
     local want = tonumber(s.lv)
     local misses, moneyFails = 0, 0
     while same(myMatch) do
-        local m, e = MX.find(s)
+        local m, e = MX.findWait(s, myMatch)
         if not m then return false end
         local level = e.lv
         if want and level >= want then return true end
@@ -2636,14 +2680,14 @@ function MX.upgrade(s, myMatch)
         local price = TW.upPrice(m) or s.c or 0
         local ready = waitUntil(function()
             local m2, e2 = MX.find(s)
-            if not m2 then return true end
+            if not m2 then return false end
             if want and e2.lv >= want then return true end
             if not TW.hasUpgrade(m2) then return true end
             if MX.cash() < (TW.upPrice(m2) or price) * margin then return false end
             return os.clock() >= mc.nextAt
         end, math.huge, myMatch, 0.05)
         if not ready then return false end
-        m, e = MX.find(s)
+        m, e = MX.findWait(s, myMatch)
         if not m then return false end
         if (want and e.lv >= want) or not TW.hasUpgrade(m) then return true end
         level = e.lv
@@ -2655,8 +2699,8 @@ function MX.upgrade(s, myMatch)
             MX.reserve(before, price)
             waitUntil(function()
                 local m3, e3 = MX.find(s)
-                return m3 == nil or e3.lv > level
-            end, 3, myMatch, 0.03)
+                return m3 ~= nil and e3.lv > level
+            end, 4, myMatch, 0.03)
             misses, moneyFails = 0, 0
         else
             mc.spend = nil
@@ -2677,7 +2721,7 @@ function MX.upgrade(s, myMatch)
 end
 function MX.sell(s, myMatch)
     for _ = 1, 4 do
-        local m, e = MX.find(s)
+        local m, e = MX.findWait(s, myMatch, 2)
         if not m then return true end
         mc.selfSell[m] = true
         local res = MT.invoke(R.Sell, m)
@@ -2692,7 +2736,7 @@ function MX.target(s, myMatch)
     local fails = 0
     for _ = 1, 12 do
         if not same(myMatch) then return false end
-        local m = MX.find(s)
+        local m = MX.findWait(s, myMatch)
         if not m then return false end
         local cur = TW.targetMode(m)
         if cur == s.mode or cur == nil then return cur == s.mode end
@@ -2731,11 +2775,11 @@ function MX.ability(s, myMatch)
         flash("Ability remote not found: " .. tostring(s.r), "Warning")
         return false
     end
-    local m = MX.find(s)
+    local m = MX.findWait(s, myMatch)
     if not m then return false end
     waitUntil(function()
         local m2 = MX.find(s)
-        return m2 == nil or MX.abilityReady(m2)
+        return m2 ~= nil and MX.abilityReady(m2)
     end, 30, myMatch, 0.2)
     m = MX.find(s)
     if not m or not same(myMatch) then return false end
@@ -2751,8 +2795,9 @@ function MX.skip(s, myMatch)
     if not R.VoteSkip or not same(myMatch) then return end
     local w = s.w or 0
     if w > 0 and mc.wave > w then return end
+    if cfg.autoSkip and not MT.isBarrier(mc.wave) then return end
     if not MT.skipAvailable() then
-        waitUntil(MT.skipAvailable, 20, myMatch, 0.1)
+        waitUntil(MT.skipAvailable, 20, myMatch, 0.05)
     end
     if not same(myMatch) or not MT.skipAvailable() then return end
     pcall(function() R.VoteSkip:FireServer() end)
@@ -3218,10 +3263,11 @@ local mainTab = Win:AddTab("Main", {Icon = "box"})
 local autoSec = mainTab:AddSection("Match")
 local autoGrid = autoSec:AddGrid({Columns = 2, CellHeight = 34})
 autoGrid:AddToggle({
-    Name = "Auto Vote", Flag = "autoVote", Tooltip = "Votes for the option typed in Game Options on the vote screen (match only)",
+    Name = "Auto Skip", Flag = "autoSkip", Tooltip = "Votes to skip the wave the moment the skip button appears (match only)",
     Callback = function(v)
-        cfg.autoVote = v
-        st.voted, st.voteTries, st.voteWarned = false, 0, false
+        cfg.autoSkip = v
+        st.skipWindow, st.skipTries = false, 0
+        if v then MT.trySkip() end
     end,
 })
 autoGrid:AddToggle({
@@ -3234,10 +3280,14 @@ autoGrid:AddToggle({
     end,
 })
 local optSec = mainTab:AddSection("Game Options")
-voteInput = optSec:AddInput({
-    Name = "Vote Option", Flag = "voteChoice", Placeholder = "empty = first option",
-    Tooltip = "Name of the option Auto Vote presses, as written on the vote button. Empty = the first option. If nothing matches, the first one is used and the real names are shown",
-    Callback = function(v) cfg.voteChoice = tostring(v or "") end,
+skipBarrierInput = optSec:AddInput({
+    Name = "Skip Barriers", Flag = "skipBarriers", Placeholder = "e.g. 10, 25, 40",
+    Tooltip = "Waves that Auto Skip will not touch, separated by commas. Each barrier wave and the pause after it play out on their own, skipping resumes on the next wave. Empty = no barriers",
+    Callback = function(v)
+        local set, list = parseBarriers(v)
+        cfg.skipBarriers = set
+        if skipBarrierInput then skipBarrierInput:Set(table.concat(list, ", "), true) end
+    end,
 })
 optSec:AddDropdown({
     Name = "After Match", Flag = "endAction", Options = END_ACTIONS, Default = cfg.endAction, Searchable = false,
@@ -4165,7 +4215,6 @@ local function initMatch()
     R.Sell = waitChild(fn, "SellTower")
     R.Mode = waitChild(fn, "ChangeTowerMode")
     R.VoteSkip = waitChild(rem, "VoteSkip")
-    R.VoteForMap = ev:FindFirstChild("VoteForMap")
     R.Replay = ev:FindFirstChild("Replay")
     R.ExitGame = ev:FindFirstChild("ExitGame")
     mc.ok = R.Request ~= nil and R.Spawn ~= nil and R.Upgrade ~= nil and R.Sell ~= nil and R.Mode ~= nil
@@ -4204,14 +4253,6 @@ local function initMatch()
             task.wait(0.1)
             local ok1, e1 = pcall(playbackTick)
             if not ok1 then warn("[sd] playback: " .. tostring(e1)) end
-            if INFO.val("Voting") == true then
-                if not st.inVote then
-                    st.inVote, st.voted, st.voteTries, st.voteWarned = true, false, 0, false
-                end
-                pcall(MT.voteStep)
-            else
-                st.inVote = false
-            end
             if mc.finalSeen then
                 st.finalShown = true
                 if cfg.endAction ~= "None" then
@@ -4229,6 +4270,24 @@ local function initMatch()
             pcall(MT.checkFarmSell)
         end
     end)
+    task.spawn(function()
+        while alive() do
+            task.wait(0.05)
+            if cfg.autoSkip then pcall(MT.trySkip) end
+        end
+    end)
+    local showSkip = rem:FindFirstChild("ShowSkip")
+    if showSkip and showSkip:IsA("RemoteEvent") then
+        showSkip.OnClientEvent:Connect(function()
+            if alive() and cfg.autoSkip then pcall(MT.trySkip) end
+        end)
+    end
+    local skipVis = INFO.obj("SkipVis")
+    if skipVis then
+        skipVis.Changed:Connect(function()
+            if alive() and cfg.autoSkip then pcall(MT.trySkip) end
+        end)
+    end
 end
 local function init()
     pcall(function()
