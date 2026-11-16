@@ -487,6 +487,7 @@ local DiamondUI = (function()
     function Section:AddDropdown(...)
         self:_break()
         local o = P({"Name", "Options", "Default", "Callback"}, ...)
+        if o.Multi then return self:_multi(o) end
         local win = self.Window
         local map, strs = {}, {}
         local function rebuild(list)
@@ -546,6 +547,67 @@ local DiamondUI = (function()
         return finish(obj, el)
     end
 
+    function Section:_multi(o)
+        local win = self.Window
+        local strs = {}
+        local function rebuild(list)
+            strs = {}
+            for i, v in ipairs(type(list) == "table" and list or {}) do strs[i] = tostring(v) end
+        end
+        rebuild(o.Options)
+        local function norm(v)
+            local set = {}
+            if type(v) == "table" then
+                for k, x in pairs(v) do
+                    if type(x) == "boolean" then
+                        if x then set[tostring(k)] = true end
+                    else
+                        set[tostring(x)] = true
+                    end
+                end
+            elseif type(v) == "string" and v ~= "" then
+                set[v] = true
+            end
+            local out = {}
+            for _, s in ipairs(strs) do
+                if set[s] then out[#out + 1] = s end
+            end
+            return out
+        end
+        local sel = norm(o.Default)
+        local ctl = {muted = 0, fired = false}
+        local el = self.Box:AddDropdown(win:_index(o.Flag), {
+            Text = tostring(o.Name or "Dropdown"), Values = strs, Default = #sel > 0 and sel or nil, Multi = true,
+            Searchable = o.Searchable == true, Tooltip = o.Tooltip,
+            Callback = function(v)
+                sel = norm(v)
+                ctl.fired = true
+                if ctl.muted == 0 then safe(o.Callback, sel) end
+            end,
+        })
+        local obj = {NoSave = o.NoSave}
+        function obj:Get()
+            local c = {}
+            for i, v in ipairs(sel) do c[i] = v end
+            return c
+        end
+        function obj:Set(v, silent)
+            local list = norm(v)
+            drive(ctl, silent, function() el:SetValue(list) end)
+            sel = list
+            if not silent and not ctl.fired then safe(o.Callback, list) end
+        end
+        function obj:SetOptions(list)
+            rebuild(list)
+            local keep = norm(sel)
+            pcall(function() el:SetValues(strs) end)
+            sel = keep
+            drive(ctl, true, function() el:SetValue(keep) end)
+        end
+        obj.Refresh = obj.SetOptions
+        self:_reg(o.Flag, obj)
+        return finish(obj, el)
+    end
     function Section:AddGrid(...)
         local o = P({"Columns", "CellHeight"}, ...)
         local cols = math.max(1, math.floor(tonumber(o.Columns) or 2))
@@ -852,6 +914,8 @@ local cfg = {
     autoJoin = false,
     joinMap = "",
     joinMode = "Solo",
+    autoModifier = false,
+    modLabels = {},
     autoClaimPass = false,
     hideName = false,
     hideUser = false,
@@ -2152,6 +2216,121 @@ function LB.mapOptions()
     if #list == 0 then list = {"(open in the lobby)"} end
     return list
 end
+LB.noMods = {"EventServers", "Event2Servers", "VersusServers"}
+LB.mod = {labels = {}, byLabel = {}, info = {}, built = false}
+LB.modTry, LB.modWarned = 0, {}
+function LB.modCatalog()
+    local M = LB.mod
+    if M.built then return M end
+    local mod = RS:FindFirstChild("Modifiers")
+    local ok, data = pcall(function() return mod and require(mod) end)
+    if not (ok and type(data) == "table") then return M end
+    local order = {Enemy = 1, Game = 2, Towers = 3}
+    local groups = {}
+    for _, g in pairs(data) do
+        if type(g) == "table" and order[g.Identifier] then groups[#groups + 1] = g end
+    end
+    table.sort(groups, function(a, b) return order[a.Identifier] < order[b.Identifier] end)
+    for _, g in ipairs(groups) do
+        local rows = {}
+        for _, e in pairs(type(g.Modifiers) == "table" and g.Modifiers or {}) do
+            if type(e) == "table" and type(e.Internal) == "string" and e.Exclusive ~= true then rows[#rows + 1] = e end
+        end
+        table.sort(rows, function(a, b)
+            local ra, rb = tonumber(a.Rarity) or 0, tonumber(b.Rarity) or 0
+            if ra ~= rb then return ra < rb end
+            return tostring(a.Display) < tostring(b.Display)
+        end)
+        for _, e in ipairs(rows) do
+            local label = string.format("[%s] %s", tostring(g.Identifier), tostring(e.Display))
+            M.labels[#M.labels + 1] = label
+            M.byLabel[label] = e.Internal
+            M.info[e.Internal] = {display = tostring(e.Display), forbidden = type(e.Forbidden) == "table" and e.Forbidden or {}}
+        end
+    end
+    M.built = #M.labels > 0
+    return M
+end
+function LB.modOptions()
+    local list = {}
+    if IN_LOBBY then
+        for _, l in ipairs(LB.modCatalog().labels) do list[#list + 1] = l end
+    end
+    for _, l in ipairs(LB.modSaved or {}) do
+        if not table.find(list, l) then list[#list + 1] = l end
+    end
+    if #list == 0 then list = {"(open in the lobby)"} end
+    return list
+end
+function LB.modsAllowed(core)
+    for _, g in ipairs(LB.noMods) do
+        local mod = RS:FindFirstChild(g)
+        local ok, list = pcall(function() return mod and require(mod) end)
+        if ok and type(list) == "table" then
+            for _, e in pairs(list) do
+                if type(e) == "table" and e.Core == core then return false end
+            end
+        end
+    end
+    return true
+end
+function LB.modWanted(sv)
+    local M = LB.modCatalog()
+    local want = {}
+    local slots = tonumber(sv and sv:GetAttribute("MaxModSlots"))
+    for _, label in ipairs(cfg.modLabels) do
+        local id = M.byLabel[label]
+        if id and not table.find(want, id) then
+            local clash
+            for _, other in ipairs(want) do
+                local fa = M.info[id] and M.info[id].forbidden or {}
+                local fb = M.info[other] and M.info[other].forbidden or {}
+                if table.find(fa, other) or table.find(fb, id) then clash = other break end
+            end
+            if clash then
+                if not LB.modWarned[id] then
+                    LB.modWarned[id] = true
+                    flash(M.info[id].display .. " conflicts with " .. M.info[clash].display .. ", skipped", "Warning")
+                end
+            elseif slots and #want >= slots then
+                if not LB.modWarned["slots"] then
+                    LB.modWarned["slots"] = true
+                    flash("Only " .. slots .. " modifier slots: the rest are skipped", "Warning")
+                end
+            else
+                want[#want + 1] = id
+            end
+        end
+    end
+    return want
+end
+function LB.syncMods(sv, core)
+    if not cfg.autoModifier then return true end
+    if sv.Name ~= tostring(lp.UserId) or not LB.modsAllowed(core) then return true end
+    local remote = RS:FindFirstChild("ModifierState")
+    local mm = sv:WaitForChild("MatchModifiers", 3)
+    if not (remote and mm) then return true end
+    local want = LB.modWanted(sv)
+    local wantSet, have = {}, {}
+    for _, id in ipairs(want) do wantSet[id] = true end
+    for _, c in ipairs(mm:GetChildren()) do have[c.Name] = true end
+    local pending = false
+    for name in pairs(have) do
+        if not wantSet[name] then
+            pcall(function() remote:FireServer(name, false) end)
+            pending = true
+            task.wait(0.25)
+        end
+    end
+    for _, id in ipairs(want) do
+        if not have[id] then
+            pcall(function() remote:FireServer(id, true) end)
+            pending = true
+            task.wait(0.25)
+        end
+    end
+    return not pending
+end
 function LB.myServer()
     local root = RS:FindFirstChild("Servers")
     if not root then return nil end
@@ -2184,6 +2363,19 @@ function LB.step()
         local cs = ev:FindFirstChild("createServer")
         if cs then pcall(function() cs:InvokeServer(core) end) end
         return 1.5
+    end
+    if cfg.autoModifier then
+        local key = sv.Name .. "|" .. core
+        if LB.modKey ~= key then LB.modKey, LB.modTry = key, 0 end
+        if LB.modTry >= 4 then
+            if not LB.modWarned[key] then
+                LB.modWarned[key] = true
+                flash("Auto Modifier: the server did not accept all modifiers (locked or incompatible), starting anyway", "Warning")
+            end
+        else
+            LB.modTry = LB.modTry + 1
+            if not LB.syncMods(sv, core) then return 0.8 end
+        end
     end
     local start = ev:FindFirstChild("start")
     if start then
@@ -2313,7 +2505,6 @@ do
             "User: <b>" .. esc(who) .. "</b>",
             "Current executor: <b>" .. esc(executorName()) .. "</b>",
             "Executor status: <b>" .. statusWord .. "</b>",
-            "Place: <b>" .. (IN_LOBBY and "Lobby" or "Match") .. "</b>",
         }, "\n"),
     })
     local checkSec = statusTab:AddSection("Executor checks")
@@ -2426,6 +2617,29 @@ lobbySec:AddDropdown({
     Tooltip = "Solo: starts your own server right away. Matchmaking: queues the server for other players",
     Callback = function(v) cfg.joinMode = (v == "Matchmaking") and "Matchmaking" or "Solo" end,
 })
+do
+    local d = Win._stateIO and Win._stateIO.read()
+    local saved = d and type(d.flags) == "table" and d.flags.modList
+    if type(saved) == "table" then LB.modSaved = saved end
+end
+lobbySec:AddToggle({
+    Name = "Auto Modifier", Flag = "autoModifier",
+    Tooltip = "Sets the ticked modifiers on your server after the map is chosen and before it starts. Modifiers that are not ticked are removed. Not offered in events or versus (lobby only)",
+    Callback = function(v)
+        cfg.autoModifier = v
+        LB.modTry = 0
+        if LB.w.mods then LB.w.mods:SetVisible(v) end
+    end,
+})
+LB.w.mods = lobbySec:AddDropdown({
+    Name = "Modifiers", Flag = "modList", Multi = true, Options = LB.modOptions(), Searchable = true,
+    Tooltip = "Enemy, Game and Tower modifiers you can pick for the map. Locked ones are skipped by the server",
+    Callback = function(list)
+        cfg.modLabels = list
+        LB.modTry = 0
+    end,
+})
+LB.w.mods:SetVisible(cfg.autoModifier)
 lobbySec:AddToggle({
     Name = "Auto Claim Battle Pass", Flag = "autoClaimPass", Tooltip = "Claims every reached battle pass reward, once every 30s (lobby only)",
     Callback = function(v) cfg.autoClaimPass = v end,
@@ -2845,6 +3059,115 @@ function MISC.blackScreen(on)
         pcall(RunService.Set3dRenderingEnabled, RunService, true)
     end
 end
+function MISC.noclip(on)
+    if on then
+        if MISC.ncConn then return end
+        MISC.ncTouched = setmetatable({}, {__mode = "k"})
+        MISC.ncConn = game:GetService("RunService").Stepped:Connect(function()
+            local char = lp.Character
+            if not char then return end
+            for _, part in ipairs(char:GetDescendants()) do
+                if part:IsA("BasePart") and part.CanCollide then
+                    MISC.ncTouched[part] = true
+                    part.CanCollide = false
+                end
+            end
+        end)
+    elseif MISC.ncConn then
+        MISC.ncConn:Disconnect()
+        MISC.ncConn = nil
+        for part in pairs(MISC.ncTouched) do
+            if part.Parent then part.CanCollide = true end
+        end
+        MISC.ncTouched = nil
+    end
+end
+MISC.walkSpeed = 32
+function MISC.speed(on)
+    if on then
+        if MISC.spConn then return end
+        MISC.spConn = game:GetService("RunService").Heartbeat:Connect(function()
+            local char = lp.Character
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            if not hum then return end
+            if not MISC.spBase then MISC.spBase = hum.WalkSpeed end
+            if hum.WalkSpeed ~= MISC.walkSpeed then hum.WalkSpeed = MISC.walkSpeed end
+        end)
+    elseif MISC.spConn then
+        MISC.spConn:Disconnect()
+        MISC.spConn = nil
+        local char = lp.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if hum then hum.WalkSpeed = MISC.spBase or 16 end
+        MISC.spBase = nil
+    end
+end
+MISC.flySpeed = 60
+function MISC.fly(on)
+    local RunSvc = game:GetService("RunService")
+    local UIS = game:GetService("UserInputService")
+    local K = Enum.KeyCode
+    local function key(k) return UIS:IsKeyDown(k) end
+    local function cleanup()
+        if MISC.flyBV then MISC.flyBV:Destroy() MISC.flyBV = nil end
+        if MISC.flyBG then MISC.flyBG:Destroy() MISC.flyBG = nil end
+    end
+    if on then
+        if MISC.flyConn then return end
+        MISC.flyCtl = false
+        pcall(function()
+            local pm = lp.PlayerScripts:FindFirstChild("PlayerModule")
+            if pm then MISC.flyCtl = require(pm):GetControls() end
+        end)
+        MISC.flyConn = RunSvc.RenderStepped:Connect(function()
+            if not alive() then MISC.fly(false) return end
+            local char = lp.Character
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            local root = char and char:FindFirstChild("HumanoidRootPart")
+            local cam = workspace.CurrentCamera
+            if not (hum and root and cam) then return end
+            if not MISC.flyBV or MISC.flyBV.Parent ~= root or not MISC.flyBG or MISC.flyBG.Parent ~= root then
+                cleanup()
+                local bg = Instance.new("BodyGyro")
+                bg.Name = "DH_FlyGyro"
+                bg.P = 9e4
+                bg.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+                bg.CFrame = root.CFrame
+                bg.Parent = root
+                local bv = Instance.new("BodyVelocity")
+                bv.Name = "DH_FlyVel"
+                bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+                bv.Velocity = Vector3.new(0, 0.1, 0)
+                bv.Parent = root
+                MISC.flyBG, MISC.flyBV = bg, bv
+            end
+            if not hum.PlatformStand then hum.PlatformStand = true end
+            local mv
+            if MISC.flyCtl then
+                local ok, v = pcall(function() return MISC.flyCtl:GetMoveVector() end)
+                if ok and typeof(v) == "Vector3" then mv = v end
+            end
+            if not mv then
+                mv = Vector3.new((key(K.D) and 1 or 0) - (key(K.A) and 1 or 0), 0, (key(K.S) and 1 or 0) - (key(K.W) and 1 or 0))
+            end
+            local cf = cam.CFrame
+            local dir = cf.RightVector * mv.X + cf.LookVector * (-mv.Z)
+            if key(K.E) or key(K.Space) then dir = dir + Vector3.yAxis end
+            if key(K.Q) or key(K.LeftControl) or key(K.LeftShift) then dir = dir - Vector3.yAxis end
+            MISC.flyBG.CFrame = cf
+            MISC.flyBV.Velocity = dir.Magnitude > 0 and dir.Unit * MISC.flySpeed or Vector3.new(0, 0.1, 0)
+        end)
+    elseif MISC.flyConn then
+        MISC.flyConn:Disconnect()
+        MISC.flyConn = nil
+        cleanup()
+        local char = lp.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        if hum then hum.PlatformStand = false end
+        if root then root.AssemblyLinearVelocity = Vector3.zero end
+    end
+end
 local FULLBRIGHT = {Brightness = 1, ClockTime = 12, FogEnd = 786543, GlobalShadows = false, Ambient = Color3.fromRGB(178, 178, 178)}
 function MISC.fullBright(on)
     local lighting = game:GetService("Lighting")
@@ -2947,11 +3270,41 @@ whSec:AddButton({
     Callback = function() WH.send(nil, WH.snapshot(), false) end,
 })
 local miscTab = Win:AddTab("Misc", {Icon = "wrench"})
-local miscSec = miscTab:AddSection("Performance")
+local miscSec = miscTab:AddSection(nil)
 miscSec:AddToggle({
     Name = "Anti AFK", Flag = "antiAfk", Tooltip = "Stops the game from kicking you for being idle",
     Callback = function(v) MISC.antiAfk(v) end,
 })
+miscSec:AddToggle({
+    Name = "Noclip", Flag = "noclip", Tooltip = "Walk through walls and other solid objects",
+    Callback = function(v) MISC.noclip(v) end,
+})
+local speedSlider
+miscSec:AddToggle({
+    Name = "Speed", Flag = "speedHack", Tooltip = "Overrides your walk speed with the value of the slider below",
+    Callback = function(v)
+        if speedSlider then speedSlider:SetVisible(v) end
+        MISC.speed(v)
+    end,
+})
+speedSlider = miscSec:AddSlider({
+    Name = "Walk Speed", Flag = "walkSpeed", Min = 16, Max = 200, Step = 1, Default = 32,
+    Callback = function(v) MISC.walkSpeed = v end,
+})
+speedSlider:SetVisible(false)
+local flySlider
+miscSec:AddToggle({
+    Name = "Fly", Flag = "fly", Tooltip = "Flies like Infinite Yield: you move along the camera. W/A/S/D or the thumbstick to move, E or Space up, Q or Ctrl down. Combine with Noclip to pass through walls",
+    Callback = function(v)
+        if flySlider then flySlider:SetVisible(v) end
+        MISC.fly(v)
+    end,
+})
+flySlider = miscSec:AddSlider({
+    Name = "Fly Speed", Flag = "flySpeed", Min = 10, Max = 300, Step = 5, Default = 60,
+    Callback = function(v) MISC.flySpeed = v end,
+})
+flySlider:SetVisible(false)
 local fpsSlider
 miscSec:AddToggle({
     Name = "Unlock FPS", Flag = "unlockFps", Tooltip = "Raises the FPS cap to the value of the slider below (needs setfpscap)",
@@ -2970,29 +3323,28 @@ fpsSlider = miscSec:AddSlider({
 })
 fpsSlider:SetVisible(false)
 miscSec:AddToggle({
+    Name = "Full Bright", Flag = "fullBright", Tooltip = "Removes darkness and fog so everything is lit",
+    Callback = function(v) MISC.fullBright(v) end,
+})
+miscSec:AddToggle({
+    Name = "No Fog", Flag = "noFog", Tooltip = "Removes fog and atmosphere haze so you can see far. Does not change brightness",
+    Callback = function(v) MISC.noFog(v) end,
+})
+miscSec:AddToggle({
+    Name = "Hide Name", Flag = "hideName", Tooltip = "Hides your name in character tags, tower info and the player list (local view)",
+    Callback = function(v) PRIV.setName(v) end,
+})
+miscSec:AddToggle({
+    Name = "Hide User", Flag = "hideUser", Tooltip = "Red body, no clothes or accessories (local view)",
+    Callback = function(v) PRIV.setUser(v) end,
+})
+miscSec:AddToggle({
     Name = "FPS Boost", Flag = "fpsBoost", Tooltip = "Turns off particles, shadows and post effects, flattens materials",
     Callback = function(v) PRIV.setFps(v) end,
 })
 miscSec:AddToggle({
-    Name = "Black Screen", Flag = "blackScreen", Tooltip = "Turns off 3D rendering to cut GPU load while farming. The menu stays usable",
+    Name = "Black Screen", Flag = "blackScreen", Tooltip = "Turns off 3D rendering and covers the screen with black to cut GPU load and lag. The menu stays usable",
     Callback = function(v) MISC.blackScreen(v) end,
-})
-local viewSec = miscTab:AddSection("Visual & Privacy")
-viewSec:AddToggle({
-    Name = "Full Bright", Flag = "fullBright", Tooltip = "Removes darkness so everything is lit",
-    Callback = function(v) MISC.fullBright(v) end,
-})
-viewSec:AddToggle({
-    Name = "No Fog", Flag = "noFog", Tooltip = "Removes fog and atmosphere haze. Does not change brightness",
-    Callback = function(v) MISC.noFog(v) end,
-})
-viewSec:AddToggle({
-    Name = "Hide Name", Flag = "hideName", Tooltip = "Hides your name in character tags, tower info and the player list (local view)",
-    Callback = function(v) PRIV.setName(v) end,
-})
-viewSec:AddToggle({
-    Name = "Hide User", Flag = "hideUser", Tooltip = "Red body, no clothes or accessories (local view)",
-    Callback = function(v) PRIV.setUser(v) end,
 })
 Win:AddSettingsTab("Settings")
 UI.OnAutoExecute = function(v)
@@ -3086,6 +3438,7 @@ local function init()
         if not ok then warn("[sk] lobby: " .. tostring(err)) end
         task.delay(3, function()
             if alive() and LB.w.map then LB.w.map:SetOptions(LB.mapOptions()) end
+            if alive() and LB.w.mods then LB.w.mods:SetOptions(LB.modOptions()) end
         end)
         return
     end
