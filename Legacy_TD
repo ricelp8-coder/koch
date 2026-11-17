@@ -800,6 +800,10 @@ function AE.queue()
     return true
 end
 
+if not RS:WaitForChild("MultiboxFramework", 15) then
+    warn("[DiamondHub] Legacy TD: this place has no MultiboxFramework, nothing to do here")
+    return
+end
 local IN_MATCH
 do
     local isLobby = RS:WaitForChild("IsLobby", 15)
