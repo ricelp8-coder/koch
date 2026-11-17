@@ -1782,10 +1782,10 @@ end
 function MT.waveChanged(n)
     n = tonumber(n) or 0
     if n <= 0 then
-        if mc.wave > 0 then MT.newMatch() end
+        if mc.wave > 0 and not mc.finalSeen then MT.newMatch() end
         return
     end
-    if (n < mc.wave) or (n == 1 and mc.finalSeen) then MT.newMatch() end
+    if (n < mc.wave and not mc.finalSeen) or (n == 1 and mc.finalSeen) then MT.newMatch() end
     mc.wave = n
     st.waveStart = os.clock()
     if n == 1 or not st.matchStart then st.matchStart = os.clock() end
