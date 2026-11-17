@@ -720,7 +720,7 @@ local DiamondUI = (function()
         end)
         self.Obs = Library:CreateWindow({
             Title = self.Title, Footer = self.Subtitle, NotifySide = "Right", ShowCustomCursor = false,
-            Size = UDim2.fromOffset(740, 500), Center = true, AutoShow = true,
+            Size = UDim2.fromOffset(740, 500), Center = true, AutoShow = true, UnlockMouseWhileOpen = false,
         })
         self.Gui = Library.ScreenGui
         pcall(function()
@@ -821,7 +821,6 @@ local MAPS = {
     {id = "ToiletHQ", name = "Toilet HQ"},
     {id = "PalmParadise", name = "Palm Paradise"},
     {id = "PumpkinPatch", name = "Pumpkin Patch"},
-    {id = "Graveyard", name = "Graveyard"},
     {id = "TurkeyTown", name = "Turkey Town"},
 }
 local MAP_BY_NAME, MAP_BY_ID, MAP_NAMES = {}, {}, {}
@@ -832,7 +831,6 @@ for i, m in ipairs(MAPS) do
 end
 local MODES = {"Easy", "Medium", "Hard", "Nightmare", "Endless"}
 local END_ACTIONS = {"None", "Replay", "Lobby"}
-local SELL_RARITIES = {"Basic", "Uncommon", "Rare", "Epic"}
 local function parseBarriers(txt)
     local set, list = {}, {}
     for num in tostring(txt or ""):gmatch("%d+") do
@@ -874,14 +872,13 @@ local cfg = {
     openCrateName = "",
     openCrateAmount = 1,
     crateDelay = 1.5,
-    summonSell = {Basic = false, Uncommon = false, Rare = false, Epic = false, Legendary = false},
     hideName = false,
     hideUser = false,
     fpsBoost = false,
 }
 local st = {
     waveStart = nil, matchStart = nil, matchMode = nil,
-    skipAt = 0, skipTries = 0, skipWindow = false, skipReady = 0,
+    skipAt = 0, skipTries = 0, skipKey = nil, skipSeen = false, skipReady = 0,
     voteTries = 0, voteLast = 0,
     finalShown = false, farmSoldMatch = nil, bootAt = os.clock(),
 }
@@ -975,13 +972,31 @@ local function money()
 end
 
 local FW = {mod = nil, loading = false, retryAt = 0, replica = nil, rLoading = false}
+function FW.gameLoaded(m)
+    if type(getloadedmodules) ~= "function" then return nil end
+    local ok, list = pcall(getloadedmodules)
+    if not ok or type(list) ~= "table" then return nil end
+    for _, x in ipairs(list) do
+        if x == m then return true end
+    end
+    return false
+end
 function FW.load()
     if FW.mod or FW.loading or os.clock() < FW.retryAt then return end
     FW.loading = true
     task.spawn(function()
         local ok, mod = pcall(function()
             local m = RS:WaitForChild("MultiboxFramework", 30)
-            return m and require(m)
+            if not m then return nil end
+            local t0 = os.clock()
+            while alive() do
+                local loaded = FW.gameLoaded(m)
+                local waited = os.clock() - t0
+                if loaded == true or waited >= 40 or (loaded == nil and waited >= 10) then break end
+                task.wait(0.25)
+            end
+            if not alive() then return nil end
+            return require(m)
         end)
         if ok and type(mod) == "table" then
             local t0 = os.clock()
@@ -1234,6 +1249,21 @@ function LB.currencySig(data)
     table.sort(keys)
     return table.concat(keys, ",")
 end
+function LB.gameSell()
+    local sell = {Basic = false, Uncommon = false, Rare = false, Epic = false, Legendary = false}
+    local frame = path(pg, "Lobby/SummonShopFrame/AutoSell")
+    if frame then
+        for rarity in pairs(sell) do
+            local ok, text = pcall(function()
+                local b = frame:FindFirstChild(rarity)
+                b = b and b:FindFirstChild("OnAndOff")
+                return b and b.Text
+            end)
+            if ok and text == "On" then sell[rarity] = true end
+        end
+    end
+    return sell
+end
 function LB.summon(n)
     if LB.sumBusy then return end
     local mod = FW.get()
@@ -1247,9 +1277,7 @@ function LB.summon(n)
     LB.sumBusy = true
     task.spawn(function()
         local before = LB.currencySig(data)
-        local sell = {}
-        for k, v in pairs(cfg.summonSell) do sell[k] = v == true end
-        FW.fire(n == 10 and "Summon10" or "Summon1", sell)
+        FW.fire(n == 10 and "Summon10" or "Summon1", LB.gameSell())
         local t0 = os.clock()
         local changed = false
         while alive() and os.clock() - t0 < 6 do
@@ -1775,7 +1803,7 @@ function MT.newMatch()
     mc.claim, mc.k2pos, mc.spend, mc.nextAt = {}, {}, nil, 0
     mc.finalSeen = false
     st.farmSoldMatch, st.waveStart, st.matchStart, st.matchMode = nil, nil, nil, nil
-    st.skipWindow, st.skipTries, st.voteTries = false, 0, 0
+    st.skipKey, st.skipTries, st.skipSeen, st.skipHold, st.voteTries = nil, 0, false, nil, 0
     if MT.endReset then MT.endReset() end
     if mc.rec then
         mc.rec = false
@@ -1808,14 +1836,31 @@ end
 function MT.fireSkip()
     return FW.fire("VoteSkipWave")
 end
+function MT.skipGap(wave)
+    return wave == 0 and 0.6 or 1.2
+end
 function MT.trySkip()
     if not cfg.autoSkip or mc.finalSeen then return end
     if not MT.skipAvailable() then
-        st.skipWindow, st.skipTries = false, 0
+        st.skipKey, st.skipTries, st.skipSeen, st.skipHold = nil, 0, false, nil
         return
     end
-    if MT.skipVoted() then return end
+    if MD.voting() then return end
     local w = MD.wave()
+    local now = os.clock()
+    local key = mc.matchId .. ":" .. w
+    if st.skipKey ~= key then
+        st.skipKey, st.skipTries, st.skipAt, st.skipReady, st.skipSeen, st.skipHold = key, 0, 0, now, false, nil
+    end
+    if MT.skipVoted() then
+        st.skipSeen = true
+        return
+    end
+    if st.skipSeen then
+        st.skipSeen, st.skipTries, st.skipAt, st.skipReady = false, 0, 0, now
+        st.skipHold = now + 0.4
+    end
+    if st.skipHold and now < st.skipHold then return end
     if isBarrier(w) then
         if st.skipWarnMatch ~= mc.matchId or st.skipWarnWave ~= w then
             st.skipWarnMatch, st.skipWarnWave = mc.matchId, w
@@ -1823,12 +1868,9 @@ function MT.trySkip()
         end
         return
     end
-    local now = os.clock()
-    if not st.skipWindow then
-        st.skipWindow, st.skipTries, st.skipAt, st.skipReady = true, 0, 0, now
-    end
-    if st.skipTries >= 3 or now - st.skipAt < 3 then return end
+    if st.skipTries >= 5 or now - st.skipAt < MT.skipGap(w) then return end
     if now - st.skipReady < (tonumber(cfg.skipDelay) or 0) then return end
+    if not FW.net() then return end
     st.skipTries = st.skipTries + 1
     st.skipAt = now
     MT.fireSkip()
@@ -2281,6 +2323,7 @@ local function onNet(kind, ev, a, ...)
     if #list >= 48 then table.remove(list, 1) end
     list[#list + 1] = base
 end
+local installDeepHook, useRaw
 mc.cb.place = function(m, e)
     if not recording() then return end
     local stamp = takeStamp("Place", function(o)
@@ -2296,6 +2339,15 @@ mc.cb.place = function(m, e)
     end)
     if not stamp then
         mc.hookMiss = true
+        local hs = genv.ld_net
+        if hs and hs.mode == "field" and not hs.escalated then
+            hs.escalated = true
+            if installDeepHook(hs) then
+                useRaw(hs)
+                flash("Switched to the deep hook: place that unit again", "Warning")
+                return
+            end
+        end
         if not mc.warnedField then
             mc.warnedField = true
             flash("A placement was not captured by the hook: it is not in the macro", "Warning")
@@ -2344,50 +2396,70 @@ mc.cb.target = function(m, e)
         tgAt[s] = os.clock()
     end
 end
+local function wrapNet(state, kind, getOrig)
+    return function(ev, ...)
+        local hub = state.hub
+        if hub and hub.mc.rec and not hub.mc.playing then pcall(hub.onNet, kind, ev, ...) end
+        return getOrig()(ev, ...)
+    end
+end
+useRaw = function(state)
+    FW.origFire, FW.origInvoke = state.rawFire, state.rawInvoke
+end
+installDeepHook = function(state)
+    if state.mode == "deep" then return true end
+    if type(hookfunction) ~= "function" then return false end
+    local net = state.net
+    if state.mode == "field" then
+        pcall(function()
+            if net.Fire == state.hookF then net.Fire = state.fire end
+            if state.hookI and net.Invoke == state.hookI then net.Invoke = state.invoke end
+        end)
+    end
+    local function hookOne(target, kind)
+        if type(target) ~= "function" then return nil end
+        local backup = type(clonefunction) == "function" and select(2, pcall(clonefunction, target)) or nil
+        local old
+        local ok, res = pcall(hookfunction, target, wrapNet(state, kind, function() return old end))
+        if not ok then return nil end
+        old = (type(res) == "function" and res ~= target and res) or (type(backup) == "function" and backup) or nil
+        return old
+    end
+    local oldF = hookOne(state.fire, "Fire")
+    if not oldF then return false end
+    local oldI = state.invoke
+    if type(state.invoke) == "function" and state.invoke ~= state.fire then
+        oldI = hookOne(state.invoke, "Invoke") or state.invoke
+    end
+    state.mode, state.rawFire, state.rawInvoke = "deep", oldF, oldI
+    return true
+end
 local function installHook()
     local net = FW.net()
     if not net or type(net.Fire) ~= "function" then return false end
     local state = genv.ld_net
     if not (state and state.net == net) then
-        state = {net = net, hub = nil}
-        local holder = {}
-        local wrap = newcclosure or function(f) return f end
-        local function mk(kind, key)
-            return function(ev, ...)
-                local hub = state.hub
-                if hub and hub.mc.rec and not hub.mc.playing and not (checkcaller and checkcaller()) then
-                    pcall(hub.onNet, kind, ev, ...)
-                end
-                return holder[key](ev, ...)
-            end
-        end
-        local origFire, origInvoke = net.Fire, net.Invoke
-        local okF
-        if type(hookfunction) == "function" then
-            local ok, old = pcall(hookfunction, origFire, wrap(mk("Fire", "fire")))
-            if ok and type(old) == "function" then
-                holder.fire = old
-                okF = true
-                if type(origInvoke) == "function" then
-                    local ok2, old2 = pcall(hookfunction, origInvoke, wrap(mk("Invoke", "invoke")))
-                    holder.invoke = (ok2 and type(old2) == "function") and old2 or origInvoke
-                end
-            end
-        end
-        if not okF then
-            holder.fire = origFire
-            holder.invoke = origInvoke
-            local ok = pcall(function()
-                net.Fire = mk("Fire", "fire")
-                if type(origInvoke) == "function" then net.Invoke = mk("Invoke", "invoke") end
-            end)
-            if not ok or net.Fire == origFire then return false end
-        end
-        state.fire, state.invoke = holder.fire, holder.invoke
+        state = {net = net, mode = nil, fire = net.Fire, invoke = net.Invoke}
+        state.rawFire, state.rawInvoke = state.fire, state.invoke
         genv.ld_net = state
     end
-    FW.origFire, FW.origInvoke = state.fire, state.invoke
     state.hub = {mc = mc, onNet = onNet}
+    if not state.mode then
+        local hookF = wrapNet(state, "Fire", function() return state.fire end)
+        pcall(function() net.Fire = hookF end)
+        if net.Fire == hookF then
+            state.mode, state.hookF = "field", hookF
+            if type(state.invoke) == "function" then
+                local hookI = wrapNet(state, "Invoke", function() return state.invoke end)
+                pcall(function() net.Invoke = hookI end)
+                if net.Invoke == hookI then state.hookI = hookI end
+            end
+        else
+            pcall(function() net.Fire = state.fire end)
+            if not installDeepHook(state) then return false end
+        end
+    end
+    useRaw(state)
     return true
 end
 
@@ -3119,10 +3191,10 @@ local mainTab = Win:AddTab("Main", {Icon = "box"})
 local autoSec = mainTab:AddSection("Match")
 local autoGrid = autoSec:AddGrid({Columns = 2, CellHeight = 34})
 autoGrid:AddToggle({
-    Name = "Auto Skip", Flag = "autoSkip", Tooltip = "Votes to skip the wave the moment the skip button appears (match only)",
+    Name = "Auto Skip", Flag = "autoSkip", Tooltip = "Votes to skip the intermission and every wave the moment the skip button appears, whether or not the enemies are cleared (match only)",
     Callback = function(v)
         cfg.autoSkip = v
-        st.skipWindow, st.skipTries = false, 0
+        st.skipKey, st.skipTries, st.skipSeen, st.skipHold = nil, 0, false, nil
         if v then MT.trySkip() end
     end,
 })
@@ -3211,14 +3283,6 @@ lobbySec:AddSlider({
     Tooltip = "Pause between two summon requests. It also waits for the summon animation to finish",
     Callback = function(v) cfg.summonDelay = math.clamp(tonumber(v) or 1.5, 0.5, 5) end,
 })
-local sellGrid2 = lobbySec:AddGrid({Columns = 2, CellHeight = 34})
-for _, rarity in ipairs(SELL_RARITIES) do
-    sellGrid2:AddToggle({
-        Name = "Auto Sell " .. rarity, Flag = "summonSell" .. rarity,
-        Tooltip = "Units of this rarity are sold right after every summon (lobby only)",
-        Callback = function(v) cfg.summonSell[rarity] = v end,
-    })
-end
 lobbySec:AddToggle({
     Name = "Auto Claim Quests", Flag = "autoClaimQuests", Tooltip = "Claims finished daily and weekly quests (lobby only)",
     Callback = function(v)
@@ -4108,9 +4172,17 @@ local function initMatch()
             if cfg.autoSkip then pcall(MT.trySkip) end
         end
     end)
-    local canSkip = MD.obj("CanSkip")
-    if canSkip then
-        canSkip.Changed:Connect(function()
+    for _, name in ipairs({"CanSkip", "CurrentWave", "Interval", "Voting"}) do
+        local o = MD.obj(name)
+        if o then
+            o.Changed:Connect(function()
+                if alive() and cfg.autoSkip then pcall(MT.trySkip) end
+            end)
+        end
+    end
+    local votes = MD.obj("VoteSkipPlayers")
+    if votes then
+        votes.ChildRemoved:Connect(function()
             if alive() and cfg.autoSkip then pcall(MT.trySkip) end
         end)
     end
