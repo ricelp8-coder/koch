@@ -1,0 +1,4190 @@
+if not game:IsLoaded() then game.Loaded:Wait() end
+do
+    local P = game:GetService("Players")
+    while not P.LocalPlayer do task.wait() end
+    local lp = P.LocalPlayer
+    local started = os.clock()
+    local function ready()
+        local char = lp.Character
+        return char ~= nil and char:FindFirstChild("HumanoidRootPart") ~= nil and lp:FindFirstChild("PlayerGui") ~= nil
+    end
+    if not ready() then
+        while not ready() and os.clock() - started < 30 do task.wait() end
+        task.wait(4)
+    end
+end
+local __ok, __err = xpcall(function()
+local DiamondUI = (function()
+    local HttpService = game:GetService("HttpService")
+    local Players = game:GetService("Players")
+    local genv = (getgenv and getgenv()) or _G
+    local REPO = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/"
+
+    if genv.__obsidian_lib then
+        pcall(function() genv.__obsidian_lib:Unload() end)
+        genv.__obsidian_lib = nil
+    end
+    pcall(function()
+        local pg = Players.LocalPlayer:FindFirstChild("PlayerGui")
+        if not pg then return end
+        for _, g in ipairs(pg:GetChildren()) do
+            if g.Name:sub(1, 10) == "DiamondUI_" then g:Destroy() end
+        end
+    end)
+
+    local function fetch(file)
+        local ok, res = pcall(function() return loadstring(game:HttpGet(REPO .. file))() end)
+        if not ok or res == nil then
+            error("Obsidian: failed to load " .. file .. ": " .. tostring(res), 0)
+        end
+        return res
+    end
+    local Library = fetch("Library.lua")
+    local ThemeManager = fetch("addons/ThemeManager.lua")
+    genv.__obsidian_lib = Library
+
+    Library:OnUnload(function()
+        if genv.__obsidian_lib ~= Library then return end
+        genv.__obsidian_lib = nil
+        genv.ld_run = nil
+        if genv.ld_privDestroy then pcall(genv.ld_privDestroy) end
+    end)
+
+    local Lib = {Version = "2.0.0", Windows = {}, Library = Library}
+    local Window = {}
+    Window.__index = Window
+    local Tab = {}
+    Tab.__index = Tab
+    local Section = {}
+    Section.__index = Section
+
+    local function safe(cb, ...)
+        if type(cb) ~= "function" then return end
+        local ok, err = pcall(cb, ...)
+        if not ok then warn("[DiamondHub] callback error: " .. tostring(err)) end
+    end
+    local function sanitize(s)
+        s = tostring(s or ""):gsub("[^%w _%-#]", ""):gsub("^%s+", ""):gsub("%s+$", "")
+        return s:sub(1, 24)
+    end
+    Lib.Sanitize = sanitize
+    local function P(keys, ...)
+        local first = ...
+        if type(first) == "table" then return first end
+        local args = {...}
+        local o = {}
+        for i, k in ipairs(keys) do o[k] = args[i] end
+        return o
+    end
+    function Lib.SetAutoExecuteToggle(v)
+        Lib.AESilent = true
+        pcall(function() Library.Toggles.DiamondAutoExecute:SetValue(v and true or false) end)
+        Lib.AESilent = false
+    end
+
+    function Lib.Rich(text, color)
+        return string.format('<font color="rgb(%d,%d,%d)">%s</font>',
+            math.floor(color.R * 255 + 0.5), math.floor(color.G * 255 + 0.5), math.floor(color.B * 255 + 0.5), tostring(text))
+    end
+
+    function Lib.MakeStore(folder, memKey)
+        local hasFS = type(writefile) == "function" and type(readfile) == "function"
+            and type(listfiles) == "function" and type(delfile) == "function"
+            and type(isfolder) == "function" and type(makefolder) == "function"
+        local mem = genv[memKey] or {items = {}, auto = nil}
+        genv[memKey] = mem
+        if hasFS then
+            pcall(function()
+                local root = folder:match("^([^/]+)")
+                if root and not isfolder(root) then makefolder(root) end
+                if not isfolder(folder) then makefolder(folder) end
+            end)
+        end
+        local S = {hasFS = hasFS}
+        local function path(n) return folder .. "/" .. n .. ".json" end
+        function S.list()
+            local names = {}
+            if hasFS then
+                local ok, files = pcall(listfiles, folder)
+                if ok and type(files) == "table" then
+                    for _, f in ipairs(files) do
+                        local n = tostring(f):match("([^/\\]+)%.json$")
+                        if n then table.insert(names, n) end
+                    end
+                end
+            else
+                for n in pairs(mem.items) do table.insert(names, n) end
+            end
+            table.sort(names)
+            return names
+        end
+        function S.exists(n)
+            for _, x in ipairs(S.list()) do
+                if x == n then return true end
+            end
+            return false
+        end
+        function S.read(n)
+            if not hasFS then return mem.items[n] end
+            local ok, raw = pcall(readfile, path(n))
+            if not ok or type(raw) ~= "string" then return nil end
+            local ok2, d = pcall(function() return HttpService:JSONDecode(raw) end)
+            if ok2 and type(d) == "table" then return d end
+            return nil
+        end
+        function S.write(n, t)
+            if not hasFS then
+                mem.items[n] = t
+                return true
+            end
+            return (pcall(function() writefile(path(n), HttpService:JSONEncode(t)) end))
+        end
+        function S.delete(n)
+            if not hasFS then
+                mem.items[n] = nil
+                return true
+            end
+            return (pcall(delfile, path(n)))
+        end
+        function S.getAuto()
+            if not hasFS then return mem.auto end
+            local ok, raw = pcall(readfile, folder .. "/_autoload.txt")
+            if ok and type(raw) == "string" then
+                local n = raw:match("^%s*(.-)%s*$")
+                if n and n ~= "" then return n end
+            end
+            return nil
+        end
+        function S.setAuto(n)
+            if not hasFS then
+                mem.auto = n
+                return
+            end
+            pcall(writefile, folder .. "/_autoload.txt", n or "")
+        end
+        return S
+    end
+
+    local function stateIO(folder)
+        local hasFS = type(writefile) == "function" and type(readfile) == "function"
+            and type(isfolder) == "function" and type(makefolder) == "function"
+        local memKey = "dui_state_" .. folder
+        local path = folder .. "/settings.json"
+        if hasFS then
+            pcall(function()
+                local root = folder:match("^([^/]+)")
+                if root and not isfolder(root) then makefolder(root) end
+                if not isfolder(folder) then makefolder(folder) end
+            end)
+        end
+        local io = {hasFS = hasFS}
+        function io.read()
+            if not hasFS then return genv[memKey] end
+            local ok, raw = pcall(readfile, path)
+            if not ok or type(raw) ~= "string" then return nil end
+            local ok2, d = pcall(function() return HttpService:JSONDecode(raw) end)
+            if ok2 and type(d) == "table" then return d end
+            return nil
+        end
+        function io.write(t)
+            if not hasFS then
+                genv[memKey] = t
+                return true
+            end
+            return (pcall(function() writefile(path, HttpService:JSONEncode(t)) end))
+        end
+        return io
+    end
+    local function encodeVal(v)
+        if typeof(v) == "Color3" then return {__c3 = {v.R, v.G, v.B}} end
+        return v
+    end
+    local function decodeVal(v)
+        if type(v) == "table" and type(v.__c3) == "table" then
+            return Color3.new(v.__c3[1] or 0, v.__c3[2] or 0, v.__c3[3] or 0)
+        end
+        return v
+    end
+
+    local recent = {}
+    function Lib:Notify(a, b, c)
+        local o = type(a) == "table" and a or {Title = a, Content = b, Duration = c}
+        local title = tostring(o.Title or "")
+        local content = tostring(o.Content or o.Description or "")
+        local dur = o.Duration or o.Time or 3
+        local key = title .. "|" .. content
+        local now = os.clock()
+        if recent[key] and recent[key] > now then return end
+        recent[key] = now + math.min(dur, 1.5)
+        if o.Type == "Warning" then
+            title = title .. " - Warning"
+        elseif o.Type == "Error" then
+            title = title .. " - Error"
+        end
+        local ok, err = pcall(function()
+            Library:Notify({Title = title, Description = content, Time = dur})
+        end)
+        if not ok then warn("[DiamondHub] notify failed: " .. tostring(err)) end
+    end
+
+    function Lib.IsOwnGui(g)
+        if not g then return false end
+        if g == Library.ScreenGui then return true end
+        local n = g.Name
+        return n:sub(1, 10) == "DiamondUI_" or n:sub(1, 8) == "Obsidian"
+    end
+
+    local function finish(obj, el)
+        obj.Element = el
+        function obj:SetVisible(v)
+            v = v and true or false
+            local ok = el and pcall(function() el:SetVisible(v) end)
+            if not ok and el and el.Holder then pcall(function() el.Holder.Visible = v end) end
+        end
+        function obj:SetDisabled(v)
+            if el then pcall(function() el:SetDisabled(v and true or false) end) end
+        end
+        function obj:Destroy()
+            if el then pcall(function() el:Destroy() end) end
+        end
+        return obj
+    end
+
+    local function fitToggleLabel(el)
+        pcall(function()
+            local holder = el.Holder
+            if not holder then return end
+            for _, d in ipairs(holder:GetDescendants()) do
+                if d:IsA("TextLabel") and d.Text ~= "" then
+                    d.TextTruncate = Enum.TextTruncate.AtEnd
+                    d.TextWrapped = false
+                    if d.Size.X.Scale >= 0.99 then
+                        d.Size = UDim2.new(d.Size.X.Scale, d.Size.X.Offset - 40, d.Size.Y.Scale, d.Size.Y.Offset)
+                    end
+                    break
+                end
+            end
+        end)
+    end
+
+    local function drive(ctl, silent, setter)
+        ctl.fired = false
+        if silent then ctl.muted = ctl.muted + 1 end
+        pcall(setter)
+        if silent then ctl.muted = ctl.muted - 1 end
+        return ctl.fired
+    end
+
+    function Section:_break()
+        if self._grid then self._grid.pending = nil end
+    end
+    function Section:_reg(flag, obj)
+        if flag then self.Window.Flags[flag] = obj end
+    end
+
+    function Section:AddLabel(...)
+        self:_break()
+        local o = P({"Text"}, ...)
+        local text = tostring(o.Text or "")
+        local el = self.Box:AddLabel({Text = text, DoesWrap = true})
+        pcall(function() el.TextLabel.RichText = true end)
+        local obj = {}
+        function obj:SetText(t)
+            text = tostring(t)
+            pcall(function() el:SetText(text) end)
+        end
+        function obj:Get() return text end
+        function obj:Set(t) obj:SetText(t) end
+        return finish(obj, el)
+    end
+
+    function Section:AddParagraph(...)
+        self:_break()
+        local o = P({"Title", "Content"}, ...)
+        local title, content = tostring(o.Title or ""), tostring(o.Content or "")
+        local function compose()
+            if title == "" then return content end
+            if content == "" then return "<b>" .. title .. "</b>" end
+            return "<b>" .. title .. "</b>\n" .. content
+        end
+        local el = self.Box:AddLabel({Text = compose(), DoesWrap = true})
+        pcall(function() el.TextLabel.RichText = true end)
+        local obj = {}
+        function obj:SetTitle(x)
+            title = tostring(x)
+            pcall(function() el:SetText(compose()) end)
+        end
+        function obj:SetContent(x)
+            content = tostring(x)
+            pcall(function() el:SetText(compose()) end)
+        end
+        return finish(obj, el)
+    end
+
+    function Section:AddDivider()
+        self:_break()
+        local el = self.Box:AddDivider()
+        return finish({}, el)
+    end
+
+    function Section:AddButton(...)
+        local o = P({"Name", "Callback"}, ...)
+        local info = {
+            Text = tostring(o.Name or "Button"),
+            Func = function() safe(o.Callback) end,
+            Tooltip = o.Tooltip,
+            Risky = o.Style == "Danger",
+        }
+        local grid = self._grid
+        local el
+        if grid and grid.cols >= 2 and grid.pending then
+            el = grid.pending:AddButton(info)
+            grid.pending = nil
+        else
+            el = self.Box:AddButton(info)
+            if grid and grid.cols >= 2 then grid.pending = el end
+        end
+        local obj = {}
+        function obj:SetText(t)
+            pcall(function() el:SetText(tostring(t)) end)
+        end
+        function obj:SetCallback(cb) o.Callback = cb end
+        return finish(obj, el)
+    end
+
+    function Section:AddToggle(...)
+        self:_break()
+        local o = P({"Name", "Default", "Callback"}, ...)
+        local win = self.Window
+        local state = o.Default == true
+        local ctl = {muted = 0, fired = false}
+        local name = tostring(o.Name or "Toggle")
+        local el = self.Box:AddToggle(win:_index(o.Flag), {
+            Text = name, Tooltip = o.Tooltip or (#name > 26 and name or nil), Default = state,
+            Callback = function(v)
+                state = v and true or false
+                ctl.fired = true
+                if ctl.muted == 0 then safe(o.Callback, state) end
+            end,
+        })
+        fitToggleLabel(el)
+        local obj = {NoSave = o.NoSave}
+        function obj:Get() return state end
+        function obj:Set(v, silent)
+            v = v and true or false
+            if v == state then return end
+            drive(ctl, silent, function() el:SetValue(v) end)
+            state = v
+            if not silent and not ctl.fired then safe(o.Callback, state) end
+        end
+        self:_reg(o.Flag, obj)
+        return finish(obj, el)
+    end
+
+    function Section:AddSlider(...)
+        self:_break()
+        local o = P({"Name", "Min", "Max", "Default", "Callback"}, ...)
+        local win = self.Window
+        local min, max = tonumber(o.Min) or 0, tonumber(o.Max) or 100
+        if max < min then min, max = max, min end
+        local step = tonumber(o.Step) or 1
+        local rounding = step >= 1 and 0 or (step >= 0.1 and 1 or 2)
+        local value = math.clamp(tonumber(o.Default) or min, min, max)
+        local ctl = {muted = 0, fired = false}
+        local el = self.Box:AddSlider(win:_index(o.Flag), {
+            Text = tostring(o.Name or "Slider"), Default = value, Min = min, Max = max, Rounding = rounding,
+            Suffix = o.Suffix and tostring(o.Suffix) or nil, Tooltip = o.Tooltip,
+            Callback = function(v)
+                value = v
+                ctl.fired = true
+                if ctl.muted == 0 then safe(o.Callback, v) end
+            end,
+        })
+        local obj = {NoSave = o.NoSave}
+        function obj:Get() return value end
+        function obj:Set(v, silent)
+            local n = tonumber(v)
+            if not n then return end
+            n = math.clamp(n, min, max)
+            drive(ctl, silent, function() el:SetValue(n) end)
+            value = n
+            if not silent and not ctl.fired then safe(o.Callback, n) end
+        end
+        self:_reg(o.Flag, obj)
+        return finish(obj, el)
+    end
+
+    function Section:AddInput(...)
+        self:_break()
+        local o = P({"Name", "Default", "Callback"}, ...)
+        local win = self.Window
+        local value = tostring(o.Default or "")
+        local ctl = {muted = 0, fired = false}
+        local el = self.Box:AddInput(win:_index(o.Flag), {
+            Text = tostring(o.Name or "Input"), Default = value, Numeric = o.Numeric == true, Finished = true,
+            ClearTextOnFocus = o.ClearOnFocus == true, Placeholder = o.Placeholder and tostring(o.Placeholder) or nil,
+            Tooltip = o.Tooltip,
+            Callback = function(v)
+                value = tostring(v or "")
+                ctl.fired = true
+                if ctl.muted == 0 then safe(o.Callback, value, true) end
+            end,
+        })
+        local obj = {NoSave = o.NoSave}
+  local box
+  pcall(function()
+  local holder = el.Holder or el.Textbox
+  for _, d in ipairs(holder:GetDescendants()) do
+  if d:IsA("TextBox") then box = d break end
+  end
+  if not box and holder:IsA("TextBox") then box = holder end
+  end)
+  function obj:Get()
+  if box and box.Parent then
+  value = tostring(box.Text or "")
+  end
+  return value
+  end
+  function obj:Set(v, silent)
+  local s = tostring(v or "")
+  drive(ctl, silent, function() el:SetValue(s) end)
+            value = s
+            if not silent and not ctl.fired then safe(o.Callback, s, false) end
+        end
+        self:_reg(o.Flag, obj)
+        return finish(obj, el)
+    end
+
+    function Section:AddKeybind(...)
+        self:_break()
+        local o = P({"Name", "Default", "Callback"}, ...)
+        local win = self.Window
+        local name = tostring(o.Name or "Keybind")
+        local lbl = self.Box:AddLabel(name)
+        local el = lbl:AddKeyPicker(win:_index(o.Flag), {
+            Default = o.Default or "None", Mode = o.Mode or "Press", Text = name, NoUI = false,
+            Callback = function() safe(o.Callback) end,
+        })
+        local obj = {NoSave = o.NoSave}
+        function obj:Get() return el.Value end
+        function obj:Set(v)
+            pcall(function() el:SetValue({tostring(v or "None"), el.Mode}) end)
+        end
+        self:_reg(o.Flag, obj)
+        return finish(obj, lbl)
+    end
+
+    function Section:AddDropdown(...)
+        self:_break()
+        local o = P({"Name", "Options", "Default", "Callback"}, ...)
+        local win = self.Window
+        local map, strs = {}, {}
+        local function rebuild(list)
+            map, strs = {}, {}
+            for i, v in ipairs(type(list) == "table" and list or {}) do
+                local s = tostring(v)
+                strs[i] = s
+                map[s] = v
+            end
+        end
+        rebuild(o.Options)
+        local searchable = o.Searchable
+        if searchable == nil then searchable = #strs > 8 end
+        local value
+        local defStr
+        if o.Default ~= nil and map[tostring(o.Default)] ~= nil then
+            defStr = tostring(o.Default)
+            value = map[defStr]
+        end
+        local ctl = {muted = 0, fired = false}
+        local el = self.Box:AddDropdown(win:_index(o.Flag), {
+            Text = tostring(o.Name or "Dropdown"), Values = strs, Default = defStr, Multi = false,
+            Searchable = searchable == true, Tooltip = o.Tooltip,
+            Callback = function(s)
+                value = s ~= nil and map[tostring(s)] or nil
+                ctl.fired = true
+                if ctl.muted == 0 and value ~= nil then safe(o.Callback, value) end
+            end,
+        })
+        local obj = {NoSave = o.NoSave}
+        function obj:Get() return value end
+        function obj:Set(v, silent)
+            local s = v ~= nil and tostring(v) or nil
+            if s ~= nil and map[s] == nil then s = nil end
+            if s == nil then
+                value = nil
+                drive(ctl, true, function() el:SetValue(nil) end)
+                return
+            end
+            drive(ctl, silent, function() el:SetValue(s) end)
+            value = map[s]
+            if not silent and not ctl.fired then safe(o.Callback, value) end
+        end
+        function obj:SetOptions(list)
+            rebuild(list)
+            local keep = value ~= nil and map[tostring(value)] ~= nil
+            pcall(function() el:SetValues(strs) end)
+            if keep then
+                drive(ctl, true, function() el:SetValue(tostring(value)) end)
+            else
+                value = nil
+                drive(ctl, true, function() el:SetValue(nil) end)
+            end
+        end
+        obj.Refresh = obj.SetOptions
+        self:_reg(o.Flag, obj)
+        return finish(obj, el)
+    end
+
+    function Section:AddGrid(...)
+        local o = P({"Columns", "CellHeight"}, ...)
+        local cols = math.max(1, math.floor(tonumber(o.Columns) or 2))
+        return setmetatable({
+            Window = self.Window, Box = self.Box, Tab = self.Tab, _grid = {cols = cols},
+        }, Section)
+    end
+
+    function Tab:AddSection(title, opts)
+        opts = opts or {}
+        self._count = self._count + 1
+        local info = {
+            Side = self._side or ((self._count % 2 == 1) and "Left" or "Right"),
+            Name = (title and title ~= "") and tostring(title) or self.Name,
+        }
+        if opts.Collapsed == true then info.Collapsed = true end
+        local box = self.Obs:AddGroupbox(info)
+        return setmetatable({Window = self.Window, Box = box, Tab = self}, Section)
+    end
+    function Tab:_default()
+        if not self._def then self._def = self:AddSection(nil) end
+        return self._def
+    end
+    for _, name in ipairs({"AddLabel", "AddParagraph", "AddDivider", "AddButton", "AddToggle", "AddSlider",
+        "AddInput", "AddDropdown", "AddGrid", "AddKeybind"}) do
+        Tab[name] = function(self, ...)
+            return Section[name](self:_default(), ...)
+        end
+    end
+
+    function Window:_index(flag)
+        self._uid = (self._uid or 0) + 1
+        if flag and not Library.Options[flag] and not Library.Toggles[flag] then return flag end
+        return (flag or "el") .. "_" .. self._uid
+    end
+
+    function Window:AddTab(name, opts)
+        opts = type(opts) == "table" and opts or {}
+        local tab = setmetatable({
+            Window = self, Name = tostring(name), _count = 0,
+            Obs = self.Obs:AddTab(tostring(name), opts.Icon),
+        }, Tab)
+        table.insert(self.Tabs, tab)
+        return tab
+    end
+
+    function Window:AddSettingsTab(name)
+        local win = self
+        local tab = self:AddTab(name or "Settings", {Icon = "settings"})
+        local menu = tab.Obs:AddGroupbox({Side = "Left", Name = "Menu", IconName = "wrench"})
+        pcall(function()
+            menu:AddToggle("ObsKeybindMenu", {
+                Text = "Open Keybind Menu", Default = Library.KeybindFrame.Visible,
+                Callback = function(v) Library.KeybindFrame.Visible = v end,
+            })
+        end)
+        pcall(function()
+            menu:AddToggle("ObsCustomCursor", {
+                Text = "Custom Cursor", Default = Library.ShowCustomCursor,
+                Callback = function(v) Library.ShowCustomCursor = v end,
+            })
+        end)
+        pcall(function()
+            menu:AddDropdown("ObsNotifySide", {
+                Values = {"Left", "Right"}, Default = "Right", Text = "Notification Side",
+                Callback = function(v) Library:SetNotifySide(v) end,
+            })
+        end)
+        pcall(function()
+            menu:AddDropdown("ObsDPI", {
+                Values = {"75%", "100%", "125%", "150%", "175%"}, Default = "100%", Text = "DPI Scale",
+                Callback = function(v) Library:SetDPIScale(tonumber((tostring(v):gsub("%%", "")))) end,
+            })
+        end)
+        pcall(function()
+            menu:AddDivider()
+            menu:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", {
+                Default = "RightShift", NoUI = true, Text = "Menu keybind",
+            })
+            Library.ToggleKeybind = Library.Options.MenuKeybind
+        end)
+        pcall(function()
+            local scriptBox = tab.Obs:AddGroupbox({Side = "Right", Name = "Script", IconName = "power"})
+            Lib.AEToggle = scriptBox:AddToggle("DiamondAutoExecute", {
+                Text = "Auto Execute", Default = false,
+                Tooltip = "Reruns the script after every teleport",
+                Callback = function(v)
+                    if Lib.AESilent then return end
+                    if Lib.OnAutoExecute then Lib.OnAutoExecute(v) end
+                end,
+            })
+            scriptBox:AddButton("Unload", function() Library:Unload() end)
+        end)
+        local ok, err = pcall(function()
+            ThemeManager:SetLibrary(Library)
+            ThemeManager:SetFolder(win.ConfigFolder)
+            ThemeManager:ApplyToTab(tab.Obs)
+        end)
+        if not ok then warn("[DiamondHub] theme manager unavailable: " .. tostring(err)) end
+        tab._side = "Right"
+        return tab
+    end
+
+    function Window:SetLoadOrder(list)
+        self._loadLast = type(list) == "table" and list or {}
+    end
+
+    function Window:_snapshot()
+        local flags, keys = {}, {}
+        for flag, comp in pairs(self.Flags) do
+            if not comp.NoSave and comp.Get then
+                local ok, v = pcall(function() return comp:Get() end)
+                if ok and v ~= nil then
+                    local ev = encodeVal(v)
+                    if pcall(function() return HttpService:JSONEncode({ev}) end) then
+                        flags[flag] = ev
+                        keys[#keys + 1] = flag
+                    end
+                end
+            end
+        end
+        table.sort(keys)
+        local sig = {}
+        for i, k in ipairs(keys) do sig[i] = k .. "=" .. HttpService:JSONEncode({flags[k]}) end
+        return flags, table.concat(sig, "\n")
+    end
+
+    function Window:RestoreState()
+        local io = self._stateIO
+        local d = io.read()
+        local restored = false
+        if type(d) == "table" and type(d.flags) == "table" then
+            restored = true
+            local late = {}
+            for _, fl in ipairs(self._loadLast or {}) do late[fl] = true end
+            local function applyFlag(flag, v)
+                local comp = self.Flags[flag]
+                if comp and not comp.NoSave and comp.Set then
+                    pcall(function() comp:Set(decodeVal(v)) end)
+                end
+            end
+            for flag, v in pairs(d.flags) do
+                if not late[flag] then applyFlag(flag, v) end
+            end
+            for _, fl in ipairs(self._loadLast or {}) do
+                if d.flags[fl] ~= nil then applyFlag(fl, d.flags[fl]) end
+            end
+        end
+        local _, last = self:_snapshot()
+        task.spawn(function()
+            while not Library.Unloaded do
+                task.wait(0.4)
+                local flags, cur = self:_snapshot()
+                if cur ~= last and io.write({v = 2, flags = flags}) then last = cur end
+            end
+        end)
+        return restored
+    end
+
+    function Window:Notify(a, b, c) Lib:Notify(a, b, c) end
+    function Window:Toggle(v) pcall(function() Library:Toggle(v) end) end
+    function Window:Destroy() pcall(function() Library:Unload() end) end
+
+    function Lib:CreateWindow(a, b)
+        local o = type(a) == "table" and a or {Title = a, Subtitle = b}
+        local self = setmetatable({}, Window)
+        self.Title = tostring(o.Title or "Window")
+        self.Subtitle = tostring(o.Subtitle or "")
+        self.ConfigFolder = tostring(o.ConfigFolder or "DiamondHub")
+        self.Flags, self.Tabs = {}, {}
+        self._stateIO = stateIO(self.ConfigFolder)
+        local PALETTE = {
+            BackgroundColor = "070a16", MainColor = "0d1228", AccentColor = "3d6bff",
+            OutlineColor = "1b2554", FontColor = "eef2ff",
+        }
+        pcall(function()
+            for k, hex in pairs(PALETTE) do Library.Scheme[k] = Color3.fromHex(hex) end
+            local def = ThemeManager.BuiltInThemes and ThemeManager.BuiltInThemes["Default"]
+            if def and type(def[2]) == "table" then
+                for k, hex in pairs(PALETTE) do def[2][k] = hex end
+            end
+        end)
+        self.Obs = Library:CreateWindow({
+            Title = self.Title, Footer = self.Subtitle, NotifySide = "Right", ShowCustomCursor = false,
+            Size = UDim2.fromOffset(740, 500), Center = true, AutoShow = true,
+        })
+        self.Gui = Library.ScreenGui
+        pcall(function()
+            for _, d in ipairs(Library.ScreenGui:GetDescendants()) do
+                if d:IsA("TextLabel") and d.Text == self.Title then
+                    d.TextXAlignment = Enum.TextXAlignment.Left
+                    local parent = d.Parent
+                    local layout = parent and parent:FindFirstChildWhichIsA("UIListLayout")
+                    if layout then
+                        layout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+                        local pad = parent:FindFirstChildWhichIsA("UIPadding") or Instance.new("UIPadding", parent)
+                        pad.PaddingLeft = UDim.new(0, 8)
+                    else
+                        d.AnchorPoint = Vector2.new(0, d.AnchorPoint.Y)
+                        d.Position = UDim2.new(0, 10, d.Position.Y.Scale, d.Position.Y.Offset)
+                    end
+                    break
+                end
+            end
+        end)
+        table.insert(Lib.Windows, self)
+        return self
+    end
+
+    return Lib
+end)()
+local UI = DiamondUI
+local Players = game:GetService("Players")
+local RS = game:GetService("ReplicatedStorage")
+local HttpService = game:GetService("HttpService")
+local TeleportService = game:GetService("TeleportService")
+local lp = Players.LocalPlayer
+local pg = lp:WaitForChild("PlayerGui")
+local genv = (getgenv and getgenv()) or _G
+local runId = os.clock()
+genv.ld_run = runId
+local function alive() return genv.ld_run == runId end
+local SCRIPT_URL = "https://raw.githubusercontent.com/ricelp8-coder/diamondHub/main/script"
+local AE = {queued = false, file = "LegacyTD/_autoexec.txt", loader = "LegacyTD/_loader.txt"}
+AE.hasFS = type(writefile) == "function" and type(readfile) == "function" and type(isfile) == "function"
+function AE.get()
+    if not AE.hasFS then return genv.ld_ae_flag == true end
+    local ok, v = pcall(function() return isfile(AE.file) and readfile(AE.file) or "" end)
+    return ok and v == "1"
+end
+function AE.set(on)
+    genv.ld_ae_flag = on and true or false
+    if not AE.hasFS then return end
+    pcall(function()
+        if type(isfolder) == "function" and type(makefolder) == "function" and not isfolder("LegacyTD") then
+            makefolder("LegacyTD")
+        end
+        writefile(AE.file, on and "1" or "0")
+    end)
+end
+function AE.code()
+    return ([[
+local on = getgenv().ld_ae_flag == true
+if type(isfile) == "function" and type(readfile) == "function" then
+    local ok, v = pcall(function() if isfile(%q) then return readfile(%q) end end)
+    if ok and v ~= nil then on = (v == "1") end
+end
+if not on then return end
+if not game:IsLoaded() then game.Loaded:Wait() end
+getgenv().ld_ae = true
+loadstring(game:HttpGet(%q))()]]):format(AE.file, AE.file, SCRIPT_URL)
+end
+function AE.takeLog() return nil end
+function AE.queue()
+    local q = (type(queue_on_teleport) == "function" and queue_on_teleport)
+        or (type(syn) == "table" and type(syn.queue_on_teleport) == "function" and syn.queue_on_teleport)
+        or (type(fluxus) == "table" and type(fluxus.queue_on_teleport) == "function" and fluxus.queue_on_teleport)
+    if not q then return false, "no queue_on_teleport in this executor" end
+    if AE.queued then return true end
+    if not pcall(q, AE.code()) then return false, "queue_on_teleport failed" end
+    AE.queued = true
+    return true
+end
+
+local IN_MATCH
+do
+    local isLobby = RS:WaitForChild("IsLobby", 15)
+    local plaza = RS:FindFirstChild("IsTradingPlaza")
+    if isLobby and isLobby:IsA("ValueBase") then
+        IN_MATCH = isLobby.Value ~= true and not (plaza and plaza.Value == true)
+    else
+        IN_MATCH = RS:FindFirstChild("MatchData") ~= nil
+    end
+end
+local MAPS = {
+    {id = "ToiletCity", name = "Toilet City"},
+    {id = "Desert", name = "Desert"},
+    {id = "CameramanHQ", name = "Cameraman HQ"},
+    {id = "ToiletHQ", name = "Toilet HQ"},
+    {id = "PalmParadise", name = "Palm Paradise"},
+    {id = "PumpkinPatch", name = "Pumpkin Patch"},
+    {id = "Graveyard", name = "Graveyard"},
+    {id = "TurkeyTown", name = "Turkey Town"},
+}
+local MAP_BY_NAME, MAP_BY_ID, MAP_NAMES = {}, {}, {}
+for i, m in ipairs(MAPS) do
+    MAP_BY_NAME[m.name] = m
+    MAP_BY_ID[m.id] = m
+    MAP_NAMES[i] = m.name
+end
+local MODES = {"Easy", "Medium", "Hard", "Nightmare", "Endless"}
+local END_ACTIONS = {"None", "Replay", "Lobby"}
+local SELL_RARITIES = {"Basic", "Uncommon", "Rare", "Epic"}
+local function parseBarriers(txt)
+    local set, list = {}, {}
+    for num in tostring(txt or ""):gmatch("%d+") do
+        local n = tonumber(num)
+        if n and n > 0 and n <= 9999 and not set[n] then
+            set[n] = true
+            list[#list + 1] = n
+        end
+    end
+    table.sort(list)
+    return set, list
+end
+local function parseWave(txt)
+    local n = tonumber(tostring(txt or ""):match("%d+"))
+    if n and n > 0 and n <= 9999 then return n end
+    return 0
+end
+local cfg = {
+    autoSkip = false,
+    skipBarriers = {},
+    skipDelay = 0,
+    autoVote = false,
+    mode = "Hard",
+    endAction = "None",
+    autoExecute = false,
+    autoSellFarm = false,
+    sellFarmWave = nil,
+    sellFarmDelay = 0.1,
+    playAgainDelay = 0,
+    leaveDelay = 0.5,
+    autoSummon1 = false,
+    autoSummon10 = false,
+    summonDelay = 1.5,
+    autoClaimQuests = false,
+    autoTeleport = false,
+    teleportMap = "Toilet City",
+    teleportPlayers = 1,
+    autoOpenCrate = false,
+    openCrateName = "",
+    openCrateAmount = 1,
+    crateDelay = 1.5,
+    summonSell = {Basic = false, Uncommon = false, Rare = false, Epic = false, Legendary = false},
+    hideName = false,
+    hideUser = false,
+    fpsBoost = false,
+}
+local st = {
+    waveStart = nil, matchStart = nil, matchMode = nil,
+    skipAt = 0, skipTries = 0, skipWindow = false, skipReady = 0,
+    voteTries = 0, voteLast = 0,
+    finalShown = false, farmSoldMatch = nil, bootAt = os.clock(),
+}
+local R = {}
+local mc = {
+    ok = false, hook = false,
+    rec = false, play = false, playing = false, running = false,
+    replay = "Hybrid", selected = nil, map = nil,
+    wave = 0, matchId = 0, ranMatch = nil, stepNo = 0,
+    steps = {},
+    stamps = {Place = {}, Upgrade = {}, Sell = {}, Target = {}},
+    reg = {}, keyN = 0, claim = {}, k2pos = {}, hookBeat = 0, hookMiss = false,
+    autoSave = true, initDone = false, finalSeen = false,
+    spend = nil, nextAt = 0, warnedField = false, warnedHotbar = {},
+}
+local MAC = UI.MakeStore("LegacyTD/Macros", "ld_mac_mem")
+local sanitize = UI.Sanitize
+local Win
+local recToggle, playToggle, macroDD, nameInput, macroStatus, importName, importJson
+local finishRecording
+local sellFarmInput, skipBarrierInput
+local barrierTxt
+UI.__booting = true
+local function flash(t, kind)
+    if UI.__booting then return end
+    UI:Notify({Title = "Diamond Hub", Content = t, Duration = 2.5, Type = kind or "Info"})
+end
+local function visible(o)
+    while o and o ~= game do
+        if o:IsA("LayerCollector") and not o.Enabled then return false end
+        if o:IsA("GuiObject") and not o.Visible then return false end
+        o = o.Parent
+    end
+    return true
+end
+local function path(root, p)
+    local o = root
+    for part in tostring(p):gmatch("[^/%.]+") do
+        o = o and o:FindFirstChild(part)
+    end
+    return o
+end
+local function fmtMoney(n)
+    local str = tostring(math.floor((tonumber(n) or 0) + 0.5))
+    local out = str:reverse():gsub("(%d%d%d)", "%1,"):reverse()
+    return (out:gsub("^,", ""))
+end
+local function xzDist(a, b)
+    local dx, dz = a.X - b.X, a.Z - b.Z
+    return math.sqrt(dx * dx + dz * dz)
+end
+local function normMap(s)
+    return tostring(s or ""):lower():gsub("%s+", " "):match("^%s*(.-)%s*$")
+end
+local function isBarrier(w)
+    local txt = skipBarrierInput and skipBarrierInput:Get()
+    if txt ~= nil and txt ~= barrierTxt then
+        barrierTxt = txt
+        cfg.skipBarriers = (parseBarriers(txt))
+    end
+    return cfg.skipBarriers[w] == true
+end
+
+local MD = {}
+function MD.folder() return RS:FindFirstChild("MatchData") end
+function MD.obj(name)
+    local f = MD.folder()
+    return f and f:FindFirstChild(name)
+end
+function MD.val(name, default)
+    local o = MD.obj(name)
+    if o and o:IsA("ValueBase") then return o.Value end
+    return default
+end
+function MD.wave() return tonumber(MD.val("CurrentWave", 0)) or 0 end
+function MD.voting() return (tonumber(MD.val("Voting", 0)) or 0) > 0 end
+local function currentMap()
+    local m = MD.val("MapId")
+    if type(m) == "string" and m ~= "" then return m end
+    return nil
+end
+local function moneyObj()
+    local ls = lp:FindFirstChild("leaderstats")
+    local m = ls and ls:FindFirstChild("Money")
+    if m and m:IsA("ValueBase") then return m end
+    return nil
+end
+local function money()
+    local m = moneyObj()
+    return m and tonumber(m.Value) or 0
+end
+
+local FW = {mod = nil, loading = false, retryAt = 0, replica = nil, rLoading = false}
+function FW.load()
+    if FW.mod or FW.loading or os.clock() < FW.retryAt then return end
+    FW.loading = true
+    task.spawn(function()
+        local ok, mod = pcall(function()
+            local m = RS:WaitForChild("MultiboxFramework", 30)
+            return m and require(m)
+        end)
+        if ok and type(mod) == "table" then
+            local t0 = os.clock()
+            while alive() and not mod.Loaded and os.clock() - t0 < 60 do task.wait(0.2) end
+            if mod.Loaded then FW.mod = mod end
+        end
+        if not FW.mod then FW.retryAt = os.clock() + 10 end
+        FW.loading = false
+    end)
+end
+function FW.get()
+    if FW.mod then return FW.mod end
+    FW.load()
+    return nil
+end
+function FW.net()
+    local m = FW.get()
+    local n = m and m.Network
+    if type(n) == "table" then return n end
+    return nil
+end
+function FW.data()
+    local m = FW.get()
+    if not m then return nil end
+    if not FW.replica then
+        if not FW.rLoading then
+            FW.rLoading = true
+            task.spawn(function()
+                local ok, r = pcall(function() return m.Replicate:WaitForReplica("PlayerData-" .. lp.UserId) end)
+                if ok and r then FW.replica = r end
+                FW.rLoading = false
+            end)
+        end
+        return nil
+    end
+    local ok, d = pcall(function() return FW.replica:GetData() end)
+    if ok and type(d) == "table" then return d end
+    return nil
+end
+function FW.shared(name)
+    local m = FW.get()
+    local s = m and m.SharedSettings
+    if s == nil then return nil end
+    local ok, v = pcall(function() return s[name] end)
+    if ok and type(v) == "table" then return v end
+    return nil
+end
+function FW.fire(ev, ...)
+    local n = FW.net()
+    if not n then return false end
+    local f = FW.origFire or n.Fire
+    return (pcall(f, ev, ...))
+end
+function FW.invoke(ev, ...)
+    local n = FW.net()
+    if not n then return false end
+    local f = FW.origInvoke or n.Invoke
+    local ok, res = pcall(f, ev, ...)
+    if not ok then return false end
+    return res == nil and true or res
+end
+
+local TW = {}
+function TW.folder() return workspace:FindFirstChild("Troops") end
+function TW.owner(m)
+    local o = m:FindFirstChild("TroopOwner")
+    return o and o.Value or nil
+end
+function TW.mine(m)
+    return typeof(m) == "Instance" and m:IsA("Model") and m.Parent == TW.folder() and TW.owner(m) == lp
+end
+function TW.pos(m)
+    local ok, cf = pcall(function() return m:GetPivot() end)
+    if ok and typeof(cf) == "CFrame" then return cf.Position end
+    return nil
+end
+function TW.level(m)
+    local l = m:FindFirstChild("TroopLevel")
+    return l and tonumber(l.Value) or 1
+end
+function TW.target(m)
+    local t = m:FindFirstChild("TroopTarget")
+    return t and t.Value or nil
+end
+function TW.def(name)
+    local d = FW.shared("TroopDatas")
+    local t = d and d[name]
+    if type(t) == "table" then return t end
+    return nil
+end
+function TW.maxLevel(name)
+    local d = TW.def(name)
+    if d and type(d.GetMaxLevel) == "function" then
+        local ok, v = pcall(d.GetMaxLevel)
+        if ok and tonumber(v) then return tonumber(v) end
+    end
+    return nil
+end
+function TW.placePrice(name)
+    local d = TW.def(name)
+    return d and tonumber(d.Price) or nil
+end
+function TW.upPrice(name, level)
+    local d = TW.def(name)
+    if d and type(d.GetNextLevelPrice) == "function" then
+        local ok, v = pcall(d.GetNextLevelPrice, level)
+        if ok and tonumber(v) then return tonumber(v) end
+    end
+    return nil
+end
+function TW.priceAt(name, level)
+    if level <= 1 then return TW.placePrice(name) end
+    return TW.upPrice(name, level - 1)
+end
+function TW.isFarm(name)
+    local d = TW.def(name)
+    if not (d and type(d.GetExtraIncome) == "function") then return false end
+    local top = TW.maxLevel(name) or 5
+    for lv = 1, top do
+        local ok, v = pcall(d.GetExtraIncome, lv)
+        if ok and tonumber(v) and tonumber(v) > 0 then return true end
+    end
+    return false
+end
+local LB = {
+    claims = {}, claimNext = 0, questBusy = false,
+    lead = nil, leadAt = 0, startAt = 0, startSent = 0,
+    tpNext = 0, cooldown = {}, entered = nil, sumBusy = false, sumFails = 0, sumMoved = false, w = {},
+}
+local INV = {
+    sellName = nil, sellLabels = {}, sellSig = "", refreshing = false, sold = nil,
+    crateLabels = {}, crateSig = "", cratePend = nil, nextCrate = 0, noCrates = "No crates in inventory", w = {},
+}
+function LB.lifts()
+    local f = workspace:FindFirstChild("Lifts")
+    return f and f:GetChildren() or {}
+end
+function LB.wantMap()
+    return MAP_BY_NAME[cfg.teleportMap] or MAPS[1]
+end
+function LB.areaOf(lift)
+    local area = lift:FindFirstChild("Area")
+    local base = lift:FindFirstChild("Base")
+    if area and area:IsA("BasePart") then return area, base end
+    if base and base:IsA("BasePart") then return base, base end
+    return nil, nil
+end
+function LB.standPos(lift)
+    local area, base = LB.areaOf(lift)
+    if not area then return nil end
+    if base and base:IsA("BasePart") then
+        return Vector3.new(area.Position.X, base.Position.Y + base.Size.Y / 2 + 3, area.Position.Z)
+    end
+    return area.Position + Vector3.new(0, 3, 0)
+end
+function LB.occupied(lift)
+    local area = LB.areaOf(lift)
+    if not area then return false end
+    local radius = math.max(6, math.max(area.Size.X, area.Size.Z) / 2 + 1)
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= lp then
+            local hrp = p.Character and p.Character:FindFirstChild("HumanoidRootPart")
+            if hrp and math.abs(hrp.Position.Y - area.Position.Y) <= 14 and xzDist(hrp.Position, area.Position) <= radius then
+                return true
+            end
+        end
+    end
+    return false
+end
+function LB.leave()
+    local lead = LB.lead
+    LB.lead, LB.entered = nil, nil
+    local char = lp.Character
+    local lift = lead and lead.lift
+    local pos = lift and LB.standPos(lift)
+    if char and pos then char:PivotTo(CFrame.new(pos + Vector3.new(26, 0, 0))) end
+end
+function LB.teleportStep()
+    local net = FW.net()
+    if not net then return 3 end
+    local now = os.clock()
+    local want, map = math.clamp(tonumber(cfg.teleportPlayers) or 1, 1, 4), LB.wantMap()
+    local lead = LB.lead
+    if lead and (not lead.lift.Parent or now - LB.leadAt > 90) then
+        LB.lead, lead = nil, nil
+    end
+    if lead then
+        if lead.map ~= map.id then
+            LB.cooldown[lead.lift] = now + 10
+            LB.leave()
+            return 1
+        end
+        local need = math.min(want, tonumber(lead.max) or want)
+        if (tonumber(lead.n) or 0) >= need and LB.startSent < 8 and now >= LB.startAt then
+            FW.fire("StartTeleport", lead.lift)
+            LB.startSent = LB.startSent + 1
+            LB.startAt = now + 2
+        end
+        return 0.5
+    end
+    local char = lp.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return 1 end
+    local best, bestD
+    for _, lift in ipairs(LB.lifts()) do
+        if lift.Name == map.id and now >= (LB.cooldown[lift] or 0) and not LB.occupied(lift) then
+            local pos = LB.standPos(lift)
+            if pos then
+                local d = (pos - hrp.Position).Magnitude
+                if not bestD or d < bestD then best, bestD = lift, d end
+            end
+        end
+    end
+    if not best then return 2 end
+    local pos = LB.standPos(best)
+    LB.entered = best
+    LB.startSent = 0
+    char:PivotTo(CFrame.new(pos))
+    local t0, nudged = os.clock(), false
+    while alive() and cfg.autoTeleport and os.clock() - t0 < 6 do
+        if LB.lead and LB.lead.lift == best then return 0.3 end
+        if not nudged and os.clock() - t0 > 1.5 then
+            nudged = true
+            char:PivotTo(CFrame.new(pos + Vector3.new(1.5, 0, 0)))
+            task.wait(0.3)
+            char:PivotTo(CFrame.new(pos))
+        end
+        task.wait(0.1)
+    end
+    if LB.lead and LB.lead.lift == best then return 0.3 end
+    LB.cooldown[best] = os.clock() + 20
+    LB.entered = nil
+    return 1
+end
+
+function LB.stopSummon(why)
+    if not (cfg.autoSummon1 or cfg.autoSummon10) then return end
+    cfg.autoSummon1, cfg.autoSummon10 = false, false
+    if LB.tg1 then LB.tg1:Set(false, true) end
+    if LB.tg10 then LB.tg10:Set(false, true) end
+    flash("Auto Summon stopped: " .. why, "Warning")
+end
+function LB.currencySig(data)
+    local c = data and data.Currencies
+    if type(c) ~= "table" then return "" end
+    local keys = {}
+    for k, v in pairs(c) do
+        if type(v) == "number" then keys[#keys + 1] = k .. "=" .. v end
+    end
+    table.sort(keys)
+    return table.concat(keys, ",")
+end
+function LB.summon(n)
+    if LB.sumBusy then return end
+    local mod = FW.get()
+    local data = FW.data()
+    if not (mod and data) or mod.SummoningTroop then return end
+    local total, cap = INV.troopCount(data), tonumber(data.MaxAmountOfTroops)
+    if cap and total + n > cap then
+        LB.stopSummon("unit inventory is full (" .. total .. "/" .. cap .. ")")
+        return
+    end
+    LB.sumBusy = true
+    task.spawn(function()
+        local before = LB.currencySig(data)
+        local sell = {}
+        for k, v in pairs(cfg.summonSell) do sell[k] = v == true end
+        FW.fire(n == 10 and "Summon10" or "Summon1", sell)
+        local t0 = os.clock()
+        local changed = false
+        while alive() and os.clock() - t0 < 6 do
+            task.wait(0.2)
+            if LB.currencySig(FW.data()) ~= before then changed = true break end
+        end
+        if changed then
+            LB.sumFails, LB.sumMoved = 0, false
+            local t1 = os.clock()
+            while alive() and mod.SummoningTroop and os.clock() - t1 < 25 do task.wait(0.2) end
+        else
+            LB.sumFails = LB.sumFails + 1
+            local zone = workspace:FindFirstChild("Zones")
+            zone = zone and zone:FindFirstChild("SummonZone")
+            local char = lp.Character
+            if not LB.sumMoved and zone and char then
+                LB.sumMoved = true
+                char:PivotTo(CFrame.new(zone.Position + Vector3.new(0, 3, 0)))
+                flash("Auto Summon: moved you into the Summon zone", "Info")
+            elseif LB.sumFails >= 3 then
+                LB.stopSummon("no effect (not enough currency?)")
+                LB.sumFails = 0
+            end
+        end
+        LB.sumBusy = false
+    end)
+end
+
+function LB.claim(key, ...)
+    local state = LB.claims[key]
+    if type(state) == "number" and os.clock() < state then return false end
+    if os.clock() < LB.claimNext then return false end
+    LB.claims[key] = os.clock() + 25
+    LB.claimNext = os.clock() + 0.8
+    FW.fire(...)
+    return true
+end
+function LB.claimQuests()
+    if LB.questBusy or IN_MATCH or not cfg.autoClaimQuests then return end
+    LB.questBusy = true
+    local ok, err = pcall(function()
+        local data = FW.data()
+        local qd = FW.shared("QuestsData")
+        local defs = qd and qd.Quests
+        if not (data and type(data.Quests) == "table" and type(defs) == "table") then return end
+        for _, kind in ipairs({"Daily", "Weekly"}) do
+            local group = type(data.Quests[kind]) == "table" and data.Quests[kind].Quests
+            if type(group) == "table" then
+                local ids = {}
+                for id in pairs(group) do ids[#ids + 1] = id end
+                table.sort(ids)
+                for _, id in ipairs(ids) do
+                    local v, def = group[id], defs[id]
+                    local req = type(def) == "table" and type(def.Requirements) == "table" and tonumber(def.Requirements[2])
+                    if req and type(v) == "table" and (tonumber(v[1]) or 0) >= req and v[2] ~= true then
+                        if LB.claim("Q/" .. kind .. "/" .. id, "ClaimQuestReward", kind, id) then return end
+                    end
+                end
+            end
+        end
+    end)
+    LB.questBusy = false
+    if not ok then warn("[ld] claim: " .. tostring(err)) end
+end
+
+function INV.troopCount(data)
+    local n = 0
+    local t = data and data.Inventory and data.Inventory.Troops
+    if type(t) == "table" then
+        for _, group in pairs(t) do
+            if type(group) == "table" then
+                for _ in pairs(group) do n = n + 1 end
+            end
+        end
+    end
+    return n
+end
+function INV.display(name)
+    local d = TW.def(name)
+    return (d and d.DisplayName) or name
+end
+function INV.sellable(name, info, equipped, uid, sellData)
+    if equipped[uid] or type(info) ~= "table" or info.ReallyLocked or info.SignedBy ~= nil then return false end
+    local d = TW.def(name)
+    local rarity = (d and d.Rarity) or "Basic"
+    return sellData == nil or sellData[rarity] ~= nil
+end
+function INV.units()
+    local data = FW.data()
+    local counts, names = {}, {}
+    local troops = data and data.Inventory and data.Inventory.Troops
+    for name, group in pairs(type(troops) == "table" and troops or {}) do
+        if type(group) == "table" then
+            local n = 0
+            for _ in pairs(group) do n = n + 1 end
+            if n > 0 then
+                names[#names + 1] = name
+                counts[name] = n
+            end
+        end
+    end
+    table.sort(names)
+    return names, counts, data ~= nil
+end
+function INV.sellPlan(name, mode)
+    local data = FW.data()
+    if type(name) ~= "string" or name == "" then return nil, "Select a unit first" end
+    local group = data and data.Inventory and data.Inventory.Troops and data.Inventory.Troops[name]
+    if type(group) ~= "table" then return nil, "Waiting for your inventory" end
+    local equipped = {}
+    for _, uid in pairs(type(data.EquippedTroopIds) == "table" and data.EquippedTroopIds or {}) do equipped[uid] = true end
+    local sellData = FW.shared("TroopsSellData")
+    local ids, total = {}, 0
+    for uid, info in pairs(group) do
+        total = total + 1
+        if INV.sellable(name, info, equipped, uid, sellData) then ids[#ids + 1] = uid end
+    end
+    table.sort(ids)
+    local want
+    if mode == "All" then
+        want = #ids
+    elseif mode == "One" then
+        want = math.min(#ids, 1)
+    elseif mode == "KeepOne" then
+        want = math.min(#ids, math.max(0, total - 1))
+    else
+        return nil, "Unknown sell mode"
+    end
+    while #ids > want do ids[#ids] = nil end
+    return ids, nil, total
+end
+function INV.refreshSell(force)
+    local names, counts, have = INV.units()
+    local list, byLabel = {"(select a unit)"}, {}
+    for _, n in ipairs(names) do
+        local label = "(x" .. counts[n] .. ") " .. INV.display(n)
+        list[#list + 1] = label
+        byLabel[label] = n
+    end
+    INV.sellLabels = byLabel
+    local label
+    for l, n in pairs(byLabel) do
+        if n == INV.sellName then label = l end
+    end
+    if INV.sellName and not label and have then INV.sellName = nil end
+    local sig = table.concat(list, "\0")
+    if INV.w.sellSel and (force or sig ~= INV.sellSig) then
+        INV.sellSig = sig
+        INV.refreshing = true
+        pcall(function()
+            INV.w.sellSel:SetOptions(list)
+            INV.w.sellSel:Set(label or list[1], true)
+        end)
+        INV.refreshing = false
+    end
+    if INV.w.sellInfo then
+        local text
+        if not have then
+            text = "Waiting for your inventory data..."
+        elseif INV.sellName then
+            local ids, _, total = INV.sellPlan(INV.sellName, "All")
+            text = INV.display(INV.sellName) .. ": " .. tostring(total or 0) .. " copies, "
+                .. tostring(ids and #ids or 0) .. " sellable (equipped, locked and signed are skipped)"
+        else
+            text = "Select a unit, then choose an action. Equipped, locked and signed copies are skipped."
+        end
+        INV.w.sellInfo:SetContent(text)
+    end
+end
+function INV.exists(uid)
+    local data = FW.data()
+    local t = data and data.Inventory and data.Inventory.Troops
+    if type(t) ~= "table" then return true end
+    for _, group in pairs(t) do
+        if type(group) == "table" and group[uid] ~= nil then return true end
+    end
+    return false
+end
+function INV.checkSale()
+    local p = INV.sold
+    if not p then return end
+    if not FW.data() then return end
+    for _, id in ipairs(p.ids) do
+        if INV.exists(id) then
+            if os.clock() - p.at > 20 and not p.warned then
+                p.warned = true
+                flash("Inventory: sale is not confirmed yet", "Warning")
+            end
+            return
+        end
+    end
+    INV.sold = nil
+    flash("Sold " .. #p.ids .. " " .. INV.display(p.name) .. " (confirmed)", "Success")
+end
+function INV.sell(mode)
+    INV.checkSale()
+    if INV.sold then
+        flash("Inventory: waiting for the previous sale to confirm", "Warning")
+        return
+    end
+    local ids, why = INV.sellPlan(INV.sellName, mode)
+    if not ids or #ids == 0 then
+        flash(why or "Inventory: no sellable copies for this action", "Warning")
+        return
+    end
+    if not FW.fire("SellTroops", ids) then
+        flash("Inventory: network is not ready", "Error")
+        return
+    end
+    INV.sold = {ids = ids, name = INV.sellName, at = os.clock()}
+    flash("Selling " .. #ids .. " " .. INV.display(INV.sellName), "Info")
+end
+
+function INV.setCrate(text)
+    if INV.w.crateInfo then INV.w.crateInfo:SetContent(text) end
+end
+function INV.crates()
+    local data = FW.data()
+    local cd = FW.shared("CrateDatas")
+    local order, byName = {}, {}
+    local crates = data and data.Inventory and data.Inventory.Crates
+    for name, group in pairs(type(crates) == "table" and crates or {}) do
+        if type(group) == "table" then
+            local ids = {}
+            for uid in pairs(group) do ids[#ids + 1] = uid end
+            if #ids > 0 then
+                table.sort(ids)
+                local def = cd and cd[name]
+                local e = {name = name, display = (type(def) == "table" and def.DisplayName) or name, ids = ids}
+                byName[name] = e
+                order[#order + 1] = e
+            end
+        end
+    end
+    table.sort(order, function(a, b) return a.display < b.display end)
+    return order, byName, data ~= nil
+end
+function INV.refreshCrates(force)
+    local sel = INV.w.crateSel
+    if not sel then return end
+    local order = INV.crates()
+    local list, labels = {}, {}
+    for _, e in ipairs(order) do
+        local label = e.display .. " (x" .. #e.ids .. ")"
+        list[#list + 1] = label
+        labels[label] = e.name
+    end
+    if #list == 0 then list[1] = INV.noCrates end
+    INV.crateLabels = labels
+    local sig = table.concat(list, "\0")
+    if force or sig ~= INV.crateSig then
+        INV.crateSig = sig
+        local chosen = list[1]
+        for label, name in pairs(labels) do
+            if name == cfg.openCrateName then chosen = label end
+        end
+        if labels[chosen] then cfg.openCrateName = labels[chosen] end
+        INV.refreshing = true
+        pcall(function()
+            sel:SetOptions(list)
+            sel:Set(chosen, true)
+        end)
+        INV.refreshing = false
+    end
+end
+function INV.crateStep()
+    local now = os.clock()
+    local _, byName, have = INV.crates()
+    local e = byName[cfg.openCrateName]
+    local p = INV.cratePend
+    if p then
+        local left = e and #e.ids or 0
+        if left <= p.count - p.amount then
+            INV.cratePend = nil
+            INV.nextCrate = now + cfg.crateDelay
+            INV.setCrate("Opened " .. p.amount .. " " .. p.display .. ", " .. left .. " left")
+        elseif now - p.at >= 15 then
+            INV.cratePend = nil
+            INV.nextCrate = now + cfg.crateDelay
+            INV.setCrate("Open was not confirmed in 15s, continuing")
+        else
+            return
+        end
+    end
+    if now < INV.nextCrate then return end
+    if not have then
+        INV.setCrate("Waiting for your inventory")
+        return
+    end
+    if not e or #e.ids == 0 then
+        INV.setCrate("No crates of the selected type")
+        return
+    end
+    local data = FW.data()
+    local total, cap = INV.troopCount(data), tonumber(data and data.MaxAmountOfTroops)
+    local amount = (cfg.openCrateAmount == 10 and #e.ids >= 10) and 10 or 1
+    if cap and total + amount > cap then
+        INV.setCrate("Unit inventory is full: " .. total .. "/" .. cap)
+        return
+    end
+    INV.cratePend = {name = e.name, display = e.display, count = #e.ids, amount = amount, at = now}
+    INV.nextCrate = now + math.max(1, cfg.crateDelay)
+    FW.fire(amount == 10 and "Open10Crate" or "Open1Crate", e.ids[1])
+    INV.setCrate("Opening " .. amount .. " " .. e.display .. ", waiting for confirmation")
+end
+function INV.loop()
+    task.spawn(function()
+        local n = 0
+        while alive() do
+            task.wait(1)
+            n = n + 1
+            pcall(INV.checkSale)
+            if n % 2 == 0 then
+                pcall(INV.refreshSell)
+                pcall(INV.refreshCrates)
+            end
+            if cfg.autoOpenCrate or INV.cratePend then
+                local ok, err = pcall(INV.crateStep)
+                if not ok then INV.setCrate("Crate error: " .. tostring(err):sub(1, 100)) end
+            end
+        end
+    end)
+end
+
+function LB.init()
+    FW.load()
+    local net
+    local t0 = os.clock()
+    while alive() and not net and os.clock() - t0 < 60 do
+        net = FW.net()
+        if not net then task.wait(0.5) end
+    end
+    if not net then
+        warn("[ld] lobby: network not available")
+        return
+    end
+    pcall(function()
+        net.Fired("QueueLeaderChanged"):Connect(function(lift, mapId, count, max, leader, voters, left)
+            if not alive() then return end
+            if leader == lp then
+                local newLift = not (LB.lead and LB.lead.lift == lift)
+                LB.lead = {lift = lift, map = mapId, n = count, max = max, voters = voters, left = left}
+                LB.leadAt = os.clock()
+                if newLift then LB.startSent, LB.startAt = 0, 0 end
+            elseif LB.lead and LB.lead.lift == lift then
+                LB.lead = nil
+            end
+        end)
+    end)
+    task.spawn(function()
+        while alive() and not FW.data() do task.wait(1) end
+    end)
+    INV.loop()
+    task.spawn(function()
+        while alive() do
+            task.wait(1)
+            if cfg.autoClaimQuests then pcall(LB.claimQuests) end
+        end
+    end)
+    task.spawn(function()
+        while alive() do
+            task.wait(math.max(cfg.summonDelay, 0.5))
+            if cfg.autoSummon1 or cfg.autoSummon10 then
+                local ok, err = pcall(LB.summon, cfg.autoSummon10 and 10 or 1)
+                if not ok then warn("[ld] summon: " .. tostring(err)) end
+            end
+        end
+    end)
+    task.spawn(function()
+        while alive() do
+            task.wait(0.5)
+            if cfg.autoTeleport and os.clock() >= LB.tpNext then
+                local ok, delay = pcall(LB.teleportStep)
+                if not ok then warn("[ld] teleport: " .. tostring(delay)) end
+                LB.tpNext = os.clock() + ((ok and tonumber(delay)) or 3)
+            end
+        end
+    end)
+end
+mc.cb = {}
+local TR = {}
+function TR.live(e, m)
+    return e ~= nil and e.gone == nil and m.Parent ~= nil
+end
+function TR.count()
+    local n = 0
+    for m, e in pairs(mc.reg) do
+        if TR.live(e, m) then n = n + 1 end
+    end
+    return n
+end
+function TR.at(pos, name, skip)
+    local best, bestD, bestE
+    for m, e in pairs(mc.reg) do
+        if TR.live(e, m) and not (skip and skip[m]) and (not name or e.name == name) then
+            e.pos = TW.pos(m) or e.pos
+            local d = xzDist(e.pos, pos)
+            if d < 1.5 and math.abs(e.pos.Y - pos.Y) < 12 and (not bestD or d < bestD) then
+                best, bestD, bestE = m, d, e
+            end
+        end
+    end
+    return best, bestE
+end
+function TR.add(m)
+    if mc.reg[m] then return end
+    local pos = TW.pos(m)
+    if not pos then return end
+    local e = {pos = pos, name = m.Name, at = os.clock()}
+    mc.reg[m] = e
+    local lv = m:FindFirstChild("TroopLevel")
+    if lv then
+        e.lv = tonumber(lv.Value) or 1
+        lv.Changed:Connect(function()
+            if not alive() then return end
+            local old = e.lv or 1
+            e.lv = tonumber(lv.Value) or old
+            if e.lv > old and mc.cb.upgrade then pcall(mc.cb.upgrade, m, e, old) end
+        end)
+    end
+    local tg = m:FindFirstChild("TroopTarget")
+    if tg then
+        tg.Changed:Connect(function()
+            if alive() and mc.cb.target then pcall(mc.cb.target, m, e) end
+        end)
+    end
+    if mc.cb.place then pcall(mc.cb.place, m, e) end
+end
+function TR.removed(m)
+    local e = mc.reg[m]
+    if not e or e.gone then return end
+    e.gone = os.clock()
+    if alive() and mc.cb.sell then pcall(mc.cb.sell, m, e) end
+    task.delay(2, function() if mc.reg[m] == e then mc.reg[m] = nil end end)
+end
+function TR.consider(m)
+    if not alive() or not m:IsA("Model") then return end
+    local t0 = os.clock()
+    while alive() and m.Parent do
+        local o = m:FindFirstChild("TroopOwner")
+        if o and o.Value ~= nil then
+            if o.Value == lp then
+                local last, same_ = nil, 0
+                local t1 = os.clock()
+                while alive() and m.Parent and os.clock() - t1 < 1.5 and same_ < 3 do
+                    local p = TW.pos(m)
+                    if p and last and (p - last).Magnitude < 0.01 then same_ = same_ + 1 else same_ = 0 end
+                    last = p
+                    task.wait(0.05)
+                end
+                if m.Parent then TR.add(m) end
+            end
+            return
+        end
+        if os.clock() - t0 > 5 then return end
+        task.wait(0.1)
+    end
+end
+function TR.connect()
+    local f = TW.folder() or workspace:WaitForChild("Troops", 30)
+    if not f then return false end
+    f.ChildAdded:Connect(function(m) task.spawn(TR.consider, m) end)
+    f.ChildRemoved:Connect(function(m) TR.removed(m) end)
+    for _, m in ipairs(f:GetChildren()) do task.spawn(TR.consider, m) end
+    return true
+end
+
+local MT = {}
+function MT.liveSellWave()
+    local txt = sellFarmInput and sellFarmInput:Get()
+    if txt ~= nil then
+        local w = parseWave(txt)
+        cfg.sellFarmWave = (w >= 1) and w or nil
+    end
+    return cfg.sellFarmWave
+end
+function MT.sellFarms(myMatch, wave)
+    task.spawn(function()
+        local list = {}
+        for m, e in pairs(mc.reg) do
+            if TR.live(e, m) and TW.isFarm(e.name) then list[#list + 1] = m end
+        end
+        local total = #list
+        if total == 0 then return end
+        local function standing()
+            local n = 0
+            for _, m in ipairs(list) do
+                if m.Parent and TR.live(mc.reg[m], m) then n = n + 1 end
+            end
+            return n
+        end
+        for _ = 1, 4 do
+            for _, m in ipairs(list) do
+                if m.Parent and TR.live(mc.reg[m], m) then
+                    FW.fire("SellTroop", m)
+                    task.wait(math.max(0.1, tonumber(cfg.sellFarmDelay) or 0.1))
+                end
+            end
+            task.wait(0.6)
+            if not alive() or mc.matchId ~= myMatch then return end
+            if standing() == 0 then break end
+        end
+        local left = standing()
+        flash(string.format("Auto Sell Farms: sold %d/%d on wave %d", total - left, total, wave),
+            left == 0 and "Success" or "Warning")
+    end)
+end
+function MT.checkFarmSell()
+    local w = MT.liveSellWave()
+    if not cfg.autoSellFarm or not w or w <= 0 or mc.wave < w then return end
+    if st.farmSoldMatch == mc.matchId then return end
+    st.farmSoldMatch = mc.matchId
+    MT.sellFarms(mc.matchId, mc.wave)
+end
+function MT.clearStamps()
+    mc.stamps = {Place = {}, Upgrade = {}, Sell = {}, Target = {}}
+end
+function MT.newMatch()
+    if mc.rec and finishRecording then finishRecording("New match") end
+    mc.matchId = mc.matchId + 1
+    mc.wave = 0
+    MT.clearStamps()
+    mc.claim, mc.k2pos, mc.spend, mc.nextAt = {}, {}, nil, 0
+    mc.finalSeen = false
+    st.farmSoldMatch, st.waveStart, st.matchStart, st.matchMode = nil, nil, nil, nil
+    st.skipWindow, st.skipTries, st.voteTries = false, 0, 0
+    if MT.endReset then MT.endReset() end
+    if mc.rec then
+        mc.rec = false
+        if recToggle then recToggle:Set(false, true) end
+        flash("Recording stopped: new match")
+    end
+end
+function MT.waveChanged(n)
+    n = tonumber(n) or 0
+    if n <= 0 then
+        if mc.wave > 0 then MT.newMatch() end
+        return
+    end
+    if (n < mc.wave) or (n == 1 and mc.finalSeen) then MT.newMatch() end
+    mc.wave = n
+    st.waveStart = os.clock()
+    if n == 1 or not st.matchStart then st.matchStart = os.clock() end
+    MT.checkFarmSell()
+end
+function MT.waveTime()
+    return st.waveStart and (os.clock() - st.waveStart) or nil
+end
+function MT.skipAvailable()
+    return MD.val("CanSkip", false) == true
+end
+function MT.skipVoted()
+    local v = MD.obj("VoteSkipPlayers")
+    return v ~= nil and v:FindFirstChild(tostring(lp.UserId)) ~= nil
+end
+function MT.fireSkip()
+    return FW.fire("VoteSkipWave")
+end
+function MT.trySkip()
+    if not cfg.autoSkip or mc.finalSeen then return end
+    if not MT.skipAvailable() then
+        st.skipWindow, st.skipTries = false, 0
+        return
+    end
+    if MT.skipVoted() then return end
+    local w = MD.wave()
+    if isBarrier(w) then
+        if st.skipWarnMatch ~= mc.matchId or st.skipWarnWave ~= w then
+            st.skipWarnMatch, st.skipWarnWave = mc.matchId, w
+            flash("Auto Skip paused: barrier on wave " .. w, "Warning")
+        end
+        return
+    end
+    local now = os.clock()
+    if not st.skipWindow then
+        st.skipWindow, st.skipTries, st.skipAt, st.skipReady = true, 0, 0, now
+    end
+    if st.skipTries >= 3 or now - st.skipAt < 3 then return end
+    if now - st.skipReady < (tonumber(cfg.skipDelay) or 0) then return end
+    st.skipTries = st.skipTries + 1
+    st.skipAt = now
+    MT.fireSkip()
+end
+function MT.myVote()
+    local vf = RS:FindFirstChild("VotingFolder")
+    local pl = vf and vf:FindFirstChild("Players")
+    local v = pl and pl:FindFirstChild("Player_" .. lp.UserId)
+    return v and v.Value or nil
+end
+function MT.voteStep()
+    if not (cfg.autoVote and MD.voting()) then return end
+    if MT.myVote() == cfg.mode then return end
+    local now = os.clock()
+    if st.voteTries >= 4 or now - st.voteLast < 1.5 then return end
+    st.voteTries = st.voteTries + 1
+    st.voteLast = now
+    st.matchMode = cfg.mode
+    FW.fire("VoteMap", cfg.mode)
+end
+
+local WH = {url = "", enabled = false, onEnd = true, image = "", icon = "", busy = false, last = nil,
+    defaultImage = "https://cdn.discordapp.com/attachments/1562919492181565470/1569079932632699072/38a64fd5-21f2-4853-b1cd-1d5f4de25cd9.jpg?ex=6af22710&is=6af0d590&hm=09323bd2aa4b77efb31d126acb517f66850d2290a2b6dbe8e0b4201d83fb9d56&",
+    defaultIcon = "https://cdn.discordapp.com/attachments/1562919492181565470/1569081973874495648/IMG_20261029_225652_662.jpg?ex=6af228f6&is=6af0d776&hm=572c30860c06acb0182f35cdae5aa9e6e740afaea76246cd345ffa20b213566d&"}
+local WH_HOSTS = {["discord.com"] = true, ["discordapp.com"] = true, ["ptb.discord.com"] = true, ["canary.discord.com"] = true}
+function WH.clean(u)
+    u = tostring(u or ""):gsub("%s+", "")
+    return u
+end
+function WH.valid(u)
+    local host = u:match("^https://([^/]+)/api/webhooks/%d+/[%w%-_]+")
+    return host ~= nil and WH_HOSTS[host:lower()] == true
+end
+function WH.request()
+    return (syn and syn.request) or (http and http.request) or http_request or request or (fluxus and fluxus.request)
+end
+function WH.post(url, payload)
+    local req = WH.request()
+    if not req then return false, "this executor has no http request function" end
+    local body = HttpService:JSONEncode(payload)
+    for attempt = 1, 2 do
+        local ok, res = pcall(req, {
+            Url = url, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = body,
+        })
+        if not ok then return false, tostring(res):sub(1, 60) end
+        local code = type(res) == "table" and tonumber(res.StatusCode or res.status_code) or 0
+        if code >= 200 and code < 300 then return true, code end
+        if code == 429 and attempt == 1 then
+            local wait = 2
+            if type(res.Body) == "string" then
+                local okj, d = pcall(function() return HttpService:JSONDecode(res.Body) end)
+                if okj and type(d) == "table" and tonumber(d.retry_after) then wait = math.min(tonumber(d.retry_after), 10) end
+            end
+            task.wait(wait + 0.2)
+        else
+            return false, code
+        end
+    end
+    return false, 429
+end
+function WH.fmtTime(sec)
+    if not sec then return "-" end
+    sec = math.max(0, math.floor(sec))
+    if sec >= 3600 then return string.format("%d:%02d:%02d", math.floor(sec / 3600), math.floor(sec % 3600 / 60), sec % 60) end
+    return string.format("%d:%02d", math.floor(sec / 60), sec % 60)
+end
+function WH.fmt(n)
+    if n == nil then return "Unavailable" end
+    return fmtMoney(n)
+end
+function WH.account()
+    local d = FW.data()
+    local c = d and d.Currencies
+    if type(c) ~= "table" then return nil, nil end
+    return tonumber(c.Coins), tonumber(c.Gems)
+end
+function WH.imageUrl()
+    local u = WH.clean(WH.image)
+    if u == "" then u = WH.defaultImage end
+    if u:match("^https://[%w%-%.]+/") then return u end
+    return nil
+end
+function WH.iconUrl()
+    local u = WH.clean(WH.icon)
+    if u == "" then u = WH.defaultIcon end
+    if u:match("^https://[%w%-%.]+/") then return u end
+    return nil
+end
+function WH.embed(won, info)
+    local result, color = "Test", 5793266
+    if won == true then
+        result, color = "Victory", 65280
+    elseif won == false then
+        result, color = "Defeat", 16711680
+    end
+    local desc = string.format("**Stage:** %s\n**Mode:** %s\n**Result:** %s\n**Wave:** %s",
+        tostring(info.map or "?"), tostring(info.mode or "?"), result, tostring(info.wave or 0))
+    local fields = {
+        {name = "Player Info", value = string.format("\240\159\145\164 Name: ||%s||", lp.Name), inline = false},
+        {name = "Clear Time", value = "\226\143\177\239\184\143 " .. WH.fmtTime(info.time), inline = false},
+    }
+    if info.coins ~= nil or info.candy ~= nil then
+        fields[#fields + 1] = {
+            name = "Match Rewards",
+            value = string.format("\240\159\146\181 Coins: %s\n\240\159\141\172 Candy: %s", WH.fmt(info.coins), WH.fmt(info.candy)),
+            inline = false,
+        }
+    end
+    local coins, gems = WH.account()
+    fields[#fields + 1] = {
+        name = "Account Totals",
+        value = string.format("\240\159\146\181 Total Coins: %s\n\240\159\146\142 Total Gems: %s", WH.fmt(coins), WH.fmt(gems)),
+        inline = false,
+    }
+    local img = WH.imageUrl()
+    local icon = WH.iconUrl()
+    local embed = {
+        title = "Diamond Hub Match Report", description = desc, color = color, fields = fields,
+        footer = {text = "Made By Diamond Hub", icon_url = icon},
+        timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+    }
+    if img then embed.image = {url = img} end
+    return {
+        username = "Diamond Hub",
+        allowed_mentions = {parse = {}},
+        embeds = {embed},
+    }
+end
+function WH.snapshot()
+    local last = WH.last or {}
+    local map = last.map or currentMap()
+    if type(map) == "string" and MAP_BY_ID[map] then map = MAP_BY_ID[map].name end
+    local timer = tonumber(MD.val("MatchTimer"))
+    return {
+        mode = last.mode or st.matchMode or "?",
+        map = map,
+        wave = math.max(MD.wave(), mc.wave or 0),
+        time = (timer and timer > 0) and timer or (st.matchStart and (os.clock() - st.matchStart) or nil),
+        coins = last.coins, candy = last.candy,
+    }
+end
+function WH.send(won, info, quiet, done)
+    local url = WH.clean(WH.url)
+    if not WH.valid(url) then
+        if not quiet then flash("Webhook: paste a valid Discord webhook link first", "Warning") end
+        if done then done() end
+        return
+    end
+    task.spawn(function()
+        local ok, why = WH.post(url, WH.embed(won, info))
+        if done then done() end
+        if not alive() then return end
+        if ok then
+            if not quiet then flash("Webhook message sent", "Success") end
+        else
+            flash("Webhook failed: " .. tostring(why), "Error")
+        end
+    end)
+end
+function WH.matchEnd()
+    if not (WH.enabled and WH.onEnd) then return end
+    WH.busy = true
+    task.spawn(function()
+        task.wait(0.8)
+        local info = WH.snapshot()
+        WH.send(WH.last and WH.last.won, info, true, function() WH.busy = false end)
+    end)
+end
+function MT.ended(stat)
+    if mc.finalSeen then return end
+    mc.finalSeen = true
+    if stat then WH.last = stat end
+    WH.matchEnd()
+    if mc.rec and finishRecording then finishRecording("Round ended") end
+    mc.matchId = mc.matchId + 1
+    mc.ranMatch = mc.matchId
+end
+function MT.finishOpen()
+    local f = path(pg, "Match/MatchFinish")
+    return f ~= nil and visible(f)
+end
+
+local END = {tp = false, tpAt = 0, sent = 0, nextAt = 0, since = 0, active = false}
+function END.reset()
+    END.active, END.sent, END.nextAt, END.tp = false, 0, 0, false
+end
+MT.endReset = END.reset
+function END.playAgainText()
+    local b = path(pg, "Match/MatchFinish/MatchFinishFrame/EndOptions/PlayAgain/ButtonFrame/PlayAgainButton")
+    return b and tostring(b.Text) or ""
+end
+function END.toLobby()
+    if AE.get() then pcall(AE.queue) end
+    FW.fire("TeleportToLobby")
+end
+function END.step(action)
+    local now = os.clock()
+    if not END.active then
+        END.active, END.since, END.sent = true, now, 0
+        local extra = action == "Lobby" and cfg.leaveDelay or cfg.playAgainDelay
+        END.nextAt = now + math.max(extra or 0, 0.5)
+    end
+    if END.tp and now - END.tpAt < 25 then return end
+    if WH.busy and now - END.since < 10 then return end
+    if now < END.nextAt then return end
+    if action == "Lobby" then
+        END.sent = END.sent + 1
+        END.toLobby()
+        END.nextAt = now + (END.sent >= 3 and 8 or 4)
+    else
+        if END.sent >= 3 then
+            flash("Replay stalled, returning to lobby", "Warning")
+            END.sent = END.sent + 1
+            END.toLobby()
+            END.nextAt = now + 8
+            return
+        end
+        END.sent = END.sent + 1
+        if END.playAgainText():lower():find("cancel", 1, true) == nil then
+            FW.fire("PlayMatchAgain")
+        end
+        END.nextAt = now + 10
+    end
+end
+local tgAt = setmetatable({}, {__mode = "k"})
+local function pushStep(s)
+    local ts = s.ts or 0
+    local i = #mc.steps
+    while i > 0 and (mc.steps[i].ts or 0) > ts do i = i - 1 end
+    table.insert(mc.steps, i + 1, s)
+end
+local function resetRecorder()
+    mc.steps = {}
+    MT.clearStamps()
+    mc.keyN = 0
+    mc.hookMiss = not mc.hook
+    mc.recT0 = os.clock()
+    mc.warnedField = false
+    for _, e in pairs(mc.reg) do e.key = nil end
+end
+local function syncToggles()
+    if recToggle then recToggle:Set(mc.rec, true) end
+    if playToggle then playToggle:Set(mc.play, true) end
+end
+local function takeStamp(kind, match)
+    local list = mc.stamps[kind]
+    local now = os.clock()
+    for i = #list, 1, -1 do
+        if now - list[i].ts > 10 then table.remove(list, i) end
+    end
+    local pickI, pickD
+    for i = #list, 1, -1 do
+        local ok, d = match(list[i])
+        if ok and (not pickD or d < pickD - 1e-6) then pickI, pickD = i, d end
+    end
+    if not pickI then return nil end
+    local picked = table.remove(list, pickI)
+    for i = #list, 1, -1 do
+        local ok, d = match(list[i])
+        if ok and d <= pickD + 1e-6 and list[i].ts <= picked.ts then table.remove(list, i) end
+    end
+    return picked
+end
+local function recordStep(kind, key, pos, stamp, extra)
+    local s = {
+        t = kind, k = key, p = {pos.X, pos.Y, pos.Z},
+        m = stamp and stamp.m or money(),
+        w = stamp and stamp.w or mc.wave,
+        wt = stamp and stamp.wt or MT.waveTime(),
+        ts = stamp and stamp.ts or os.clock(),
+    }
+    s.rt = math.max(0, s.ts - (mc.recT0 or s.ts))
+    for k, v in pairs(extra or {}) do s[k] = v end
+    pushStep(s)
+    return s
+end
+local function a2v(a) return Vector3.new(a[1], a[2], a[3]) end
+local function a2cf(a)
+    if type(a) ~= "table" or #a ~= 12 then return nil end
+    local ok, v = pcall(function() return CFrame.new(table.unpack(a)) end)
+    if ok and typeof(v) == "CFrame" then return v end
+    return nil
+end
+local function recording() return mc.rec and not mc.playing end
+local function keyOf(inst)
+    local e = typeof(inst) == "Instance" and mc.reg[inst]
+    return e and e.key or nil
+end
+local MX = {}
+function MX.byKey(key)
+    local pos = key and mc.k2pos[key]
+    if not pos then return nil end
+    return (TR.at(pos))
+end
+local function uidToTroop(uid)
+    local data = FW.data()
+    local t = data and data.Inventory and data.Inventory.Troops
+    if type(t) ~= "table" or type(uid) ~= "string" then return nil end
+    for tid, group in pairs(t) do
+        if type(group) == "table" and group[uid] ~= nil then return tid end
+    end
+    return nil
+end
+local function resolveUid(tid, saved)
+    local data = FW.data()
+    local group = data and data.Inventory and data.Inventory.Troops and data.Inventory.Troops[tid]
+    if type(group) ~= "table" then return saved end
+    local equipped = {}
+    for _, uid in pairs(type(data.EquippedTroopIds) == "table" and data.EquippedTroopIds or {}) do equipped[uid] = true end
+    local pick
+    for uid in pairs(group) do
+        if equipped[uid] and (not pick or uid < pick) then pick = uid end
+    end
+    if pick then return pick, true end
+    for uid in pairs(group) do
+        if not pick or uid < pick then pick = uid end
+    end
+    return pick or saved
+end
+local function encArg(v, depth)
+    depth = depth or 0
+    local t = typeof(v)
+    if t == "string" then
+        local tid = uidToTroop(v)
+        if tid then return {__uid = tid} end
+        return v
+    end
+    if t == "number" or t == "boolean" then return v end
+    if t == "Vector3" then return {__v3 = {v.X, v.Y, v.Z}} end
+    if t == "CFrame" then return {__cf = {v:GetComponents()}} end
+    if t == "Instance" then
+        local k = keyOf(v)
+        if k then return {__tw = k} end
+        local ok, full = pcall(function() return v:GetFullName() end)
+        if ok and type(full) == "string" then return {__path = full} end
+    end
+    if t == "table" and depth < 3 then
+        local entries = {}
+        for k, val in pairs(v) do
+            local kt = type(k)
+            if kt == "string" or kt == "number" or kt == "boolean" then
+                entries[#entries + 1] = {k, encArg(val, depth + 1)}
+            end
+        end
+        return {__tbl = entries}
+    end
+    return {__nil = true}
+end
+local function decArg(v)
+    if type(v) ~= "table" then return v end
+    if type(v.__v3) == "table" then return Vector3.new(v.__v3[1] or 0, v.__v3[2] or 0, v.__v3[3] or 0) end
+    if type(v.__cf) == "table" then return a2cf(v.__cf) end
+    if v.__tw ~= nil then return MX.byKey(v.__tw) end
+    if v.__uid ~= nil then return (resolveUid(v.__uid, v.__uid)) end
+    if type(v.__path) == "string" then
+        local o = game
+        for part in v.__path:gmatch("[^%.]+") do
+            if o == game then
+                local ok, svc = pcall(function() return game:GetService(part) end)
+                o = ok and svc or game:FindFirstChild(part)
+            else
+                o = o and o:FindFirstChild(part)
+            end
+        end
+        if o ~= game then return o end
+        return nil
+    end
+    if type(v.__tbl) == "table" then
+        local out = {}
+        for _, pair in ipairs(v.__tbl) do out[decArg(pair[1])] = decArg(pair[2]) end
+        return out
+    end
+    return nil
+end
+local function spatialOf(v, depth)
+    depth = depth or 0
+    local t = typeof(v)
+    if t == "Vector3" then return v end
+    if t == "CFrame" then return v.Position end
+    if t == "table" and depth < 3 then
+        for _, val in pairs(v) do
+            local r = spatialOf(val, depth + 1)
+            if r then return r end
+        end
+    end
+    return nil
+end
+local ACT_EVENTS = {UpgradeTroop = "Upgrade", SellTroop = "Sell", ChangeTargetting = "Target"}
+local IGNORE_EVENTS = {
+    VoteMap = true, PlayMatchAgain = true, CancelPlayAgain = true, TeleportToLobby = true, TeleportBackToMainLobby = true,
+    PlayerSettingChanged = true, ViewedUpdate = true, UseTimedBoost = true, RejoinMatch = true, CancelRejoinMatch = true,
+    TradingLoaded = true, StartTeleport = true, EquipBestTroops = true, UnequipAllTroops = true, ToggleEquipTroop = true,
+    Summon1 = true, Summon10 = true, Open1Crate = true, Open10Crate = true, SellTroops = true, ClaimQuestReward = true,
+    SignItem = true,
+}
+local function onNet(kind, ev, a, ...)
+    if type(ev) ~= "string" or not recording() then return end
+    mc.hookBeat = os.clock()
+    local now = os.clock()
+    local base = {ts = now, m = money(), w = mc.wave, wt = MT.waveTime()}
+    local stampKind = ACT_EVENTS[ev]
+    if stampKind then
+        if typeof(a) ~= "Instance" or not TW.mine(a) then return end
+        base.tower, base.pos = a, TW.pos(a)
+        local list = mc.stamps[stampKind]
+        if #list >= 48 then table.remove(list, 1) end
+        list[#list + 1] = base
+        return
+    end
+    if ev == "VoteSkipWave" then
+        if not MT.skipAvailable() then return end
+        for i = #mc.steps, 1, -1 do
+            local o = mc.steps[i]
+            if o.t == "skip" and o.w == mc.wave then return end
+        end
+        recordStep("skip", nil, Vector3.zero, base, {})
+        return
+    end
+    if IGNORE_EVENTS[ev] then return end
+    local rest = table.pack(a, ...)
+    local n = rest.n
+    while n > 0 and rest[n] == nil do n = n - 1 end
+    if typeof(a) == "Instance" and TW.mine(a) then
+        local e = mc.reg[a]
+        if not (e and e.key) then
+            if not mc.warnedField then
+                mc.warnedField = true
+                flash("Action on a unit that was not recorded (placed before Record): skipped", "Warning")
+            end
+            return
+        end
+        local args = {}
+        for i = 2, n do args[i - 1] = encArg(rest[i]) end
+        recordStep("act", e.key, e.pos, base, {n = e.name, ev = ev, nk = kind, a = args, an = math.max(n - 1, 0)})
+        return
+    end
+    local spatial
+    local tname
+    for i = 1, n do
+        spatial = spatial or spatialOf(rest[i])
+        if type(rest[i]) == "string" then
+            tname = tname or (TW.def(rest[i]) and rest[i]) or uidToTroop(rest[i])
+        end
+    end
+    if not (spatial or tname) then return end
+    local args = {}
+    for i = 1, n do args[i] = encArg(rest[i]) end
+    base.ev, base.nk, base.args, base.an, base.n, base.pos = ev, kind, args, n, tname, spatial
+    local list = mc.stamps.Place
+    if #list >= 48 then table.remove(list, 1) end
+    list[#list + 1] = base
+end
+mc.cb.place = function(m, e)
+    if not recording() then return end
+    local stamp = takeStamp("Place", function(o)
+        if o.n and o.n ~= e.name then return false end
+        if os.clock() - o.ts > 8 then return false end
+        local d = os.clock() - o.ts
+        if o.pos then
+            local sd = xzDist(o.pos, e.pos)
+            if sd > 14 then return false end
+            d = sd + d * 0.01
+        end
+        return true, d
+    end)
+    if not stamp then
+        mc.hookMiss = true
+        if not mc.warnedField then
+            mc.warnedField = true
+            flash("A placement was not captured by the hook: it is not in the macro", "Warning")
+        end
+        return
+    end
+    mc.keyN = mc.keyN + 1
+    e.key = "T" .. mc.keyN
+    recordStep("place", e.key, e.pos, stamp, {
+        n = e.name, c = TW.placePrice(e.name), ev = stamp.ev, nk = stamp.nk, a = stamp.args, an = stamp.an,
+    })
+end
+mc.cb.upgrade = function(m, e, old)
+    if not (recording() and e.key) then return end
+    local stamp = takeStamp("Upgrade", function(o)
+        if o.tower == m then return true, 0 end
+        return false
+    end)
+    if not stamp then return end
+    recordStep("upgrade", e.key, e.pos, stamp, {n = e.name, lv = e.lv, c = TW.priceAt(e.name, e.lv)})
+end
+mc.cb.sell = function(m, e)
+    if not (recording() and e.key) then return end
+    local stamp = takeStamp("Sell", function(o)
+        if o.tower == m then return true, 0 end
+        return false
+    end)
+    if not stamp then return end
+    recordStep("sell", e.key, e.pos, stamp, {n = e.name})
+end
+mc.cb.target = function(m, e)
+    if not (recording() and e.key) then return end
+    local stamp = takeStamp("Target", function(o)
+        if o.tower == m then return true, 0 end
+        return false
+    end)
+    if not stamp then return end
+    local mode = TW.target(m)
+    if mode == nil then return end
+    local last = mc.steps[#mc.steps]
+    if last and last.t == "target" and last.k == e.key and tgAt[last] and os.clock() - tgAt[last] < 2.5 then
+        last.mode = mode
+        tgAt[last] = os.clock()
+    else
+        local s = recordStep("target", e.key, e.pos, stamp, {n = e.name, mode = mode})
+        tgAt[s] = os.clock()
+    end
+end
+local function installHook()
+    local net = FW.net()
+    if not net or type(net.Fire) ~= "function" then return false end
+    local state = genv.ld_net
+    if not (state and state.net == net) then
+        state = {net = net, hub = nil}
+        local holder = {}
+        local wrap = newcclosure or function(f) return f end
+        local function mk(kind, key)
+            return function(ev, ...)
+                local hub = state.hub
+                if hub and hub.mc.rec and not hub.mc.playing and not (checkcaller and checkcaller()) then
+                    pcall(hub.onNet, kind, ev, ...)
+                end
+                return holder[key](ev, ...)
+            end
+        end
+        local origFire, origInvoke = net.Fire, net.Invoke
+        local okF
+        if type(hookfunction) == "function" then
+            local ok, old = pcall(hookfunction, origFire, wrap(mk("Fire", "fire")))
+            if ok and type(old) == "function" then
+                holder.fire = old
+                okF = true
+                if type(origInvoke) == "function" then
+                    local ok2, old2 = pcall(hookfunction, origInvoke, wrap(mk("Invoke", "invoke")))
+                    holder.invoke = (ok2 and type(old2) == "function") and old2 or origInvoke
+                end
+            end
+        end
+        if not okF then
+            holder.fire = origFire
+            holder.invoke = origInvoke
+            local ok = pcall(function()
+                net.Fire = mk("Fire", "fire")
+                if type(origInvoke) == "function" then net.Invoke = mk("Invoke", "invoke") end
+            end)
+            if not ok or net.Fire == origFire then return false end
+        end
+        state.fire, state.invoke = holder.fire, holder.invoke
+        genv.ld_net = state
+    end
+    FW.origFire, FW.origInvoke = state.fire, state.invoke
+    state.hub = {mc = mc, onNet = onNet}
+    return true
+end
+
+local function same(myMatch)
+    return alive() and mc.play and mc.matchId == myMatch
+end
+local function sleep(t, myMatch)
+    local t0 = os.clock()
+    while os.clock() - t0 < t do
+        if not same(myMatch) then return false end
+        task.wait(0.05)
+    end
+    return same(myMatch)
+end
+local function waitUntil(cond, timeout, myMatch, step)
+    local t0 = os.clock()
+    while same(myMatch) do
+        if cond() then return true end
+        if os.clock() - t0 > timeout then return false end
+        if step == 0 then task.wait() else task.wait(step or 0.1) end
+    end
+    return false
+end
+function MX.cash()
+    local c = money()
+    local sp = mc.spend
+    if sp and (c ~= sp.before or os.clock() - sp.at > 3) then
+        mc.spend = nil
+        sp = nil
+    end
+    return math.max(0, c - (sp and sp.amount or 0))
+end
+function MX.reserve(before, amount)
+    amount = math.max(0, tonumber(amount) or 0)
+    if money() ~= before then
+        mc.spend = nil
+        return
+    end
+    local sp = mc.spend
+    mc.spend = {before = before, amount = amount + ((sp and sp.before == before) and sp.amount or 0), at = os.clock()}
+end
+function MX.touch(gap)
+    mc.nextAt = os.clock() + (gap or 0.3)
+end
+function MX.cadence(myMatch)
+    return waitUntil(function() return os.clock() >= mc.nextAt end, 3, myMatch, 0.02)
+end
+function MX.find(s)
+    local pos = (s.k and mc.k2pos[s.k]) or a2v(s.p)
+    local m, e = TR.at(pos, s.n)
+    if not m and s.n then m, e = TR.at(pos) end
+    return m, e
+end
+function MX.findWait(s, myMatch, timeout)
+    local m, e = MX.find(s)
+    if m then return m, e end
+    waitUntil(function()
+        m, e = MX.find(s)
+        return m ~= nil
+    end, timeout or 2.5, myMatch, 0.05)
+    return m, e
+end
+function MX.decodeArgs(s, first)
+    local args, n = {}, tonumber(s.an) or 0
+    if type(s.a) == "table" then
+        for i = 1, n do args[i] = decArg(s.a[i]) end
+    end
+    if first ~= nil then
+        table.insert(args, 1, first)
+        n = n + 1
+    end
+    return args, n
+end
+function MX.send(s, args, n)
+    if s.nk == "Invoke" then
+        local f = FW.origInvoke or (FW.net() and FW.net().Invoke)
+        if type(f) ~= "function" then return false end
+        local ok, res = pcall(function() return f(s.ev, table.unpack(args, 1, n)) end)
+        return ok and res ~= false
+    end
+    local f = FW.origFire or (FW.net() and FW.net().Fire)
+    if type(f) ~= "function" then return false end
+    return (pcall(function() f(s.ev, table.unpack(args, 1, n)) end))
+end
+function MX.place(s, myMatch)
+    local p = a2v(s.p)
+    local have, he = TR.at(p, s.n, mc.claim)
+    if have then
+        mc.claim[have] = true
+        if s.k then mc.k2pos[s.k] = he.pos end
+        return true, have
+    end
+    if not s.ev then return false end
+    local attempts, moneyFails = 0, 0
+    while same(myMatch) do
+        local there, te = TR.at(p, s.n, mc.claim)
+        if there then
+            mc.claim[there] = true
+            if s.k then mc.k2pos[s.k] = te.pos end
+            return true, there
+        end
+        local margin = 1 + 0.03 * math.min(moneyFails, 10)
+        local price = TW.placePrice(s.n) or s.c or 0
+        local ready = waitUntil(function()
+            there = TR.at(p, s.n, mc.claim)
+            if there then return true end
+            if MX.cash() < price * margin then return false end
+            return os.clock() >= mc.nextAt
+        end, math.huge, myMatch, 0.05)
+        if not ready then return false end
+        if there then
+            local m2, e2 = TR.at(p, s.n, mc.claim)
+            if m2 then
+                mc.claim[m2] = true
+                if s.k then mc.k2pos[s.k] = e2.pos end
+                return true, m2
+            end
+        end
+        local before = money()
+        local calledAt = os.clock()
+        local args, n = MX.decodeArgs(s)
+        local sent = MX.send(s, args, n)
+        MX.touch(0.4)
+        local nm, ne
+        if sent then
+            waitUntil(function()
+                nm, ne = TR.at(p, s.n, mc.claim)
+                if not nm then
+                    for m3, e3 in pairs(mc.reg) do
+                        if TR.live(e3, m3) and e3.name == s.n and not mc.claim[m3] and e3.at >= calledAt - 0.2 then
+                            nm, ne = m3, e3
+                        end
+                    end
+                end
+                return nm ~= nil
+            end, 3.5, myMatch, 0.03)
+        end
+        if nm then
+            mc.claim[nm] = true
+            MX.reserve(before, price)
+            local live = TW.pos(nm) or ne.pos
+            if s.k then mc.k2pos[s.k] = live end
+            if xzDist(live, p) > 3 then
+                warn(string.format("[ld] %s placed at %.1f,%.1f,%.1f but the recorded position is %.1f,%.1f,%.1f",
+                    tostring(s.n), live.X, live.Y, live.Z, p.X, p.Y, p.Z))
+            end
+            return true, nm
+        end
+        mc.spend = nil
+        if money() < price then
+            moneyFails = moneyFails + 1
+            if not sleep(0.35 + 0.15 * math.min(moneyFails, 8), myMatch) then return false end
+        else
+            attempts = attempts + 1
+            if attempts >= 5 then
+                flash(tostring(s.n) .. ": place rejected, step skipped", "Warning")
+                return false
+            end
+            if not sleep(0.6, myMatch) then return false end
+        end
+    end
+    return false
+end
+function MX.upgrade(s, myMatch)
+    local want = tonumber(s.lv)
+    local misses, moneyFails = 0, 0
+    while same(myMatch) do
+        local m = MX.findWait(s, myMatch)
+        if not m then return false end
+        local level = TW.level(m)
+        if want and level >= want then return true end
+        local maxL = TW.maxLevel(s.n or m.Name)
+        if maxL and level >= maxL then return true end
+        local margin = 1 + 0.03 * math.min(moneyFails, 10)
+        local price = TW.upPrice(m.Name, level) or s.c or 0
+        local ready = waitUntil(function()
+            local m2 = MX.find(s)
+            if not m2 then return false end
+            local l2 = TW.level(m2)
+            if want and l2 >= want then return true end
+            if MX.cash() < (TW.upPrice(m2.Name, l2) or price) * margin then return false end
+            return os.clock() >= mc.nextAt
+        end, math.huge, myMatch, 0.05)
+        if not ready then return false end
+        m = MX.findWait(s, myMatch)
+        if not m then return false end
+        level = TW.level(m)
+        if want and level >= want then return true end
+        price = TW.upPrice(m.Name, level) or price
+        local before = money()
+        FW.fire("UpgradeTroop", m)
+        MX.touch(0.35)
+        local up = waitUntil(function()
+            local m3 = MX.find(s)
+            return m3 ~= nil and TW.level(m3) > level
+        end, 3, myMatch, 0.03)
+        if up then
+            MX.reserve(before, price)
+            misses, moneyFails = 0, 0
+        else
+            mc.spend = nil
+            if money() < price then
+                moneyFails = moneyFails + 1
+                if not sleep(0.35 + 0.15 * math.min(moneyFails, 8), myMatch) then return false end
+            else
+                misses = misses + 1
+                if misses >= 4 then
+                    flash("Upgrade rejected, step skipped", "Warning")
+                    return false
+                end
+                if not sleep(0.5, myMatch) then return false end
+            end
+        end
+    end
+    return false
+end
+function MX.sell(s, myMatch)
+    for _ = 1, 4 do
+        local m = MX.findWait(s, myMatch, 2)
+        if not m then return true end
+        FW.fire("SellTroop", m)
+        MX.touch(0.3)
+        if waitUntil(function() return MX.find(s) == nil end, 3, myMatch, 0.03) then return true end
+        if not same(myMatch) then return false end
+        if not sleep(0.4, myMatch) then return false end
+    end
+    return false
+end
+function MX.target(s, myMatch)
+    local fails = 0
+    for _ = 1, 12 do
+        if not same(myMatch) then return false end
+        local m = MX.findWait(s, myMatch)
+        if not m then return false end
+        local cur = TW.target(m)
+        if cur == s.mode or cur == nil then return cur == s.mode end
+        if not MX.cadence(myMatch) then return false end
+        FW.fire("ChangeTargetting", m)
+        MX.touch(0.3)
+        local moved = waitUntil(function()
+            local m2 = MX.find(s)
+            return m2 == nil or TW.target(m2) ~= cur
+        end, 2, myMatch, 0.04)
+        if not moved then
+            fails = fails + 1
+            if fails >= 3 then return false end
+        end
+    end
+    local m = MX.find(s)
+    return m ~= nil and TW.target(m) == s.mode
+end
+function MX.act(s, myMatch)
+    if not s.ev then return false end
+    local m = MX.findWait(s, myMatch)
+    if not m then return false end
+    local args, n = MX.decodeArgs(s, m)
+    MX.send(s, args, n)
+    MX.touch(0.3)
+    return sleep(0.35, myMatch)
+end
+function MX.skip(s, myMatch)
+    if not same(myMatch) then return end
+    local w = s.w or 0
+    if w > 0 and mc.wave > w then return end
+    if cfg.autoSkip and not isBarrier(mc.wave) then return end
+    if not MT.skipAvailable() then
+        waitUntil(MT.skipAvailable, 20, myMatch, 0.05)
+    end
+    if not same(myMatch) or not MT.skipAvailable() or MT.skipVoted() then return end
+    MT.fireSkip()
+    MX.touch(0.3)
+end
+local function gate(s, myMatch)
+    local mode = mc.replay
+    local timed = mode == "Time"
+    local hybrid = mode == "Hybrid"
+    if s.t == "skip" and mode == "Money" then return false end
+    if timed and (s.w or 0) <= 0 and s.rt and mc.playT0 then
+        local due = math.max(0, s.rt - (mc.playRt0 or 0))
+        if not waitUntil(function() return mc.wave >= 1 or os.clock() - mc.playT0 >= due end, math.huge, myMatch) then
+            return false
+        end
+    end
+    if s.t == "sell" or s.t == "skip" or s.t == "act" or timed or hybrid then
+        local w = s.w or 0
+        if w > 0 then
+            if not waitUntil(function() return mc.wave >= w end, math.huge, myMatch) then return false end
+            if (s.t == "sell" or s.t == "skip" or s.t == "act" or timed) and s.wt then
+                local due = math.min(s.wt, 900)
+                local reached = waitUntil(function()
+                    return mc.wave > w or (st.waveStart ~= nil and os.clock() - st.waveStart >= due)
+                end, math.huge, myMatch)
+                if not reached then return false end
+            end
+        end
+    end
+    return same(myMatch)
+end
+local function runPlayback(myMatch)
+    mc.playing = true
+    mc.stepNo = 0
+    mc.claim = setmetatable({}, {__mode = "k"})
+    mc.k2pos = {}
+    mc.spend, mc.nextAt = nil, 0
+    mc.warnedHotbar = {}
+    local steps = mc.steps
+    local tData = os.clock()
+    while same(myMatch) and not FW.data() and os.clock() - tData < 15 do task.wait(0.2) end
+    mc.playT0 = os.clock()
+    mc.playRt0 = nil
+    for _, s0 in ipairs(steps) do
+        if s0.rt then mc.playRt0 = s0.rt break end
+    end
+    do
+        local data = FW.data()
+        local eq = {}
+        for _, id in pairs(data and type(data.EquippedTroops) == "table" and data.EquippedTroops or {}) do eq[id] = true end
+        local seen, missing = {}, {}
+        for _, s0 in ipairs(steps) do
+            if s0.t == "place" and s0.n and not seen[s0.n] then
+                seen[s0.n] = true
+                if data and not eq[s0.n] then missing[#missing + 1] = tostring(s0.n) end
+            end
+        end
+        if #missing > 0 then flash("Not in your loadout: " .. table.concat(missing, ", "), "Warning") end
+    end
+    for i, s in ipairs(steps) do
+        if not same(myMatch) then break end
+        mc.stepNo = i
+        if gate(s, myMatch) then
+            if s.t == "place" then
+                MX.place(s, myMatch)
+            elseif s.t == "upgrade" then
+                MX.upgrade(s, myMatch)
+            elseif s.t == "sell" then
+                MX.sell(s, myMatch)
+            elseif s.t == "target" then
+                MX.target(s, myMatch)
+            elseif s.t == "skip" then
+                MX.skip(s, myMatch)
+            elseif s.t == "act" then
+                MX.act(s, myMatch)
+            end
+            task.wait()
+        end
+    end
+    local finished = same(myMatch) and mc.stepNo >= #steps
+    mc.playing = false
+    if finished then flash("Macro finished, waiting for the next match", "Success") end
+end
+local function assignKeys(steps)
+    local alive_, lv, n = {}, {}, 0
+    for _, s in ipairs(steps) do
+        local p = a2v(s.p)
+        if s.t == "skip" then
+        elseif s.t == "place" then
+            n = n + 1
+            s.k = s.k or ("L" .. n)
+            alive_[s.k] = {pos = p, name = s.n}
+            lv[s.k] = 1
+        else
+            if not s.k then
+                local best, bestD
+                for k, a in pairs(alive_) do
+                    local d = xzDist(a.pos, p)
+                    if d < 1.0 and (not bestD or d < bestD) then best, bestD = k, d end
+                end
+                s.k = best
+            end
+            if s.k then
+                if s.t == "upgrade" then
+                    if s.lv then
+                        lv[s.k] = s.lv
+                    else
+                        lv[s.k] = (lv[s.k] or 1) + 1
+                        s.lv = lv[s.k]
+                    end
+                elseif s.t == "sell" then
+                    alive_[s.k] = nil
+                end
+            end
+        end
+    end
+end
+local function cleanSteps(arr)
+    local out = {}
+    if type(arr) ~= "table" then return out end
+    for _, s in ipairs(arr) do
+        if type(s) == "table" and type(s.t) == "string" and type(s.p) == "table"
+            and type(s.p[1]) == "number" and type(s.p[2]) == "number" and type(s.p[3]) == "number" then
+            table.insert(out, s)
+        end
+    end
+    return out
+end
+local function macroPlan(steps)
+    local total, unknown, towers = 0, 0, {}
+    for _, s in ipairs(steps) do
+        if s.t == "place" then
+            towers[s.k or ""] = {name = s.n, level = 1}
+            local pr = s.n and TW.placePrice(s.n)
+            if pr then total = total + pr else unknown = unknown + 1 end
+        elseif s.t == "upgrade" then
+            local tw = towers[s.k or ""]
+            if tw then
+                local pr = TW.priceAt(tw.name, tw.level + 1)
+                if pr then total = total + pr else unknown = unknown + 1 end
+                tw.level = tw.level + 1
+            else
+                unknown = unknown + 1
+            end
+        elseif s.t == "sell" then
+            towers[s.k or ""] = nil
+        end
+    end
+    return total, unknown
+end
+local function refreshMacroList()
+    if macroDD then macroDD:SetOptions(MAC.list()) end
+end
+local function loadMacro(name, silent)
+    local d = MAC.read(name)
+    local steps = d and cleanSteps(d.steps) or {}
+    if #steps == 0 then
+        if not silent then flash("Macro not found or empty: " .. tostring(name), "Error") end
+        return false
+    end
+    assignKeys(steps)
+    mc.steps = steps
+    mc.map = (type(d.map) == "string" and d.map ~= "") and d.map or nil
+    mc.selected = name
+    MAC.setAuto(name)
+    if macroDD then macroDD:Set(name, true) end
+    if nameInput then nameInput:Set(name, true) end
+    if not silent then
+        local total = macroPlan(steps)
+        if total > 0 then
+            flash("Loaded macro: " .. name .. " (" .. #steps .. " steps, about $" .. fmtMoney(total) .. ")", "Success")
+        else
+            flash("Loaded macro: " .. name .. " (" .. #steps .. " steps)", "Success")
+        end
+    end
+    return true
+end
+local function saveMacro()
+    local n = sanitize(nameInput:Get())
+    if n == "" then
+        flash("Enter a macro name first", "Warning")
+        return
+    end
+    if #mc.steps == 0 then
+        flash("Nothing to save: record a macro first", "Warning")
+        return
+    end
+    if MAC.write(n, {v = 2, replay = mc.replay, map = mc.map or currentMap(), steps = mc.steps}) then
+        mc.selected = n
+        MAC.setAuto(n)
+        refreshMacroList()
+        macroDD:Set(n, true)
+        flash("Saved macro: " .. n .. " (" .. #mc.steps .. " steps)", "Success")
+    else
+        flash("Save failed", "Error")
+    end
+end
+local function deleteMacro()
+    local n = sanitize(nameInput:Get())
+    if n == "" then n = mc.selected or "" end
+    if n == "" or not MAC.exists(n) then
+        flash("Pick a saved macro to delete", "Warning")
+        return
+    end
+    if MAC.delete(n) then
+        if mc.selected == n then
+            mc.selected = nil
+            mc.steps, mc.map = {}, nil
+            MAC.setAuto(nil)
+        end
+        refreshMacroList()
+        macroDD:Set(nil, true)
+        flash("Deleted macro: " .. n, "Success")
+    else
+        flash("Delete failed", "Error")
+    end
+end
+local function nextMacroName()
+    local n = 1
+    while MAC.exists("macro #" .. n) do n = n + 1 end
+    return "macro #" .. n
+end
+local function importMacro()
+    if mc.play or mc.rec then
+        flash("Turn Record / Play off first", "Warning")
+        return
+    end
+    local raw = tostring(importJson:Get() or ""):match("^%s*(.-)%s*$")
+    if raw == "" then
+        flash("Paste the macro JSON first", "Warning")
+        return
+    end
+    local ok, d = pcall(function() return HttpService:JSONDecode(raw) end)
+    if not ok or type(d) ~= "table" then
+        flash("Import failed: invalid JSON", "Error")
+        return
+    end
+    local steps = cleanSteps(type(d.steps) == "table" and d.steps or d)
+    if #steps == 0 then
+        flash("Import failed: no valid steps", "Error")
+        return
+    end
+    local name = sanitize(importName:Get())
+    if name == "" and type(d.name) == "string" then name = sanitize(d.name) end
+    if name == "" then name = nextMacroName() end
+    local replay = (d.replay == "Time" or d.replay == "Money" or d.replay == "Hybrid") and d.replay or mc.replay
+    local map = (type(d.map) == "string" and d.map ~= "") and d.map or nil
+    if not MAC.write(name, {v = 2, replay = replay, map = map, steps = steps}) then
+        flash("Import failed: could not save", "Error")
+        return
+    end
+    refreshMacroList()
+    loadMacro(name, true)
+    importJson:Set("", true)
+    importName:Set("", true)
+    flash("Imported macro: " .. name .. " (" .. #steps .. " steps)", "Success")
+end
+local function exportMacro()
+    local n = mc.selected or sanitize(nameInput:Get())
+    local d = n and n ~= "" and MAC.read(n)
+    if not d then
+        flash("Pick a saved macro to copy", "Warning")
+        return
+    end
+    d.name = n
+    if type(setclipboard) ~= "function" then
+        flash("setclipboard is not supported here", "Error")
+        return
+    end
+    setclipboard(HttpService:JSONEncode(d))
+    flash("Macro JSON copied: " .. n, "Success")
+end
+local function mapGate()
+    if not mc.map then return "go" end
+    local cur = currentMap()
+    if cur then
+        if normMap(cur) == normMap(mc.map) then return "go" end
+        mc.ranMatch = mc.matchId
+        return "block"
+    end
+    if mc.mapWaitMatch ~= mc.matchId then
+        mc.mapWaitMatch, mc.mapWaitAt = mc.matchId, os.clock()
+    end
+    if os.clock() - mc.mapWaitAt < 10 then return "wait" end
+    return "go"
+end
+finishRecording = function(why)
+    if not mc.rec then return end
+    MT.clearStamps()
+    mc.rec = false
+    syncToggles()
+    if #mc.steps == 0 then
+        flash(why .. ": nothing was recorded", "Warning")
+        return
+    end
+    if mc.autoSave == false then
+        flash(why .. ": recording stopped, " .. #mc.steps .. " steps kept (press Save)")
+        return
+    end
+    local name = sanitize(nameInput and nameInput:Get() or "")
+    if name == "" then name = nextMacroName() end
+    mc.map = mc.map or currentMap()
+    if MAC.write(name, {v = 2, replay = mc.replay, map = mc.map, steps = mc.steps}) then
+        mc.selected = name
+        MAC.setAuto(name)
+        refreshMacroList()
+        if macroDD then macroDD:Set(name, true) end
+        if nameInput then nameInput:Set(name, true) end
+        flash(why .. ": macro saved as " .. name .. " (" .. #mc.steps .. " steps)", "Success")
+    else
+        flash("Auto-save failed", "Error")
+    end
+end
+local function matchReady()
+    if MD.voting() then return false end
+    if MD.wave() >= 1 or (tonumber(MD.val("Interval", 0)) or 0) > 0 then return true end
+    return os.clock() - st.bootAt > 15
+end
+local function playbackTick()
+    if mc.ok and mc.play and not mc.running and #mc.steps > 0 and mc.selected
+        and mc.ranMatch ~= mc.matchId and not mc.finalSeen and matchReady()
+        and mapGate() == "go" then
+        mc.ranMatch = mc.matchId
+        mc.running = true
+        local myMatch = mc.matchId
+        task.spawn(function()
+            local ok, err = pcall(runPlayback, myMatch)
+            if not ok then
+                flash("Macro error: " .. tostring(err):sub(1, 40), "Error")
+                warn("[sd] macro: " .. tostring(err))
+            end
+            mc.playing = false
+            mc.running = false
+        end)
+    end
+end
+
+Win = UI:CreateWindow({
+    Title = "Diamond Hub", Subtitle = "Legacy TD", ConfigFolder = "LegacyTD",
+})
+do
+    local DISCORD_LINK = "https://discord.gg/U7U2GanMSW"
+    local GREEN = Color3.fromRGB(70, 210, 130)
+    local RED = Color3.fromRGB(240, 85, 95)
+    local function fn(f)
+        return type(f) == "function"
+    end
+    local function esc(text)
+        return (tostring(text):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"))
+    end
+    local function executorName()
+        local ok, name = pcall(function()
+            if type(identifyexecutor) == "function" then return (identifyexecutor()) end
+            if type(getexecutorname) == "function" then return (getexecutorname()) end
+            return nil
+        end)
+        if ok and name then
+            local clean = tostring(name)
+            clean = clean:gsub("%s*[%(%[].-[%)%]]", "")
+            clean = clean:gsub("[%s%-_]+[vV]?%d[%w%.%-_]*", "")
+            clean = clean:gsub("^%s+", ""):gsub("%s+$", "")
+            if clean == "" then return "Unknown" end
+            return clean
+        end
+        return "Unknown"
+    end
+    local function copyText(text)
+        local fns = {}
+        if fn(setclipboard) then table.insert(fns, setclipboard) end
+        if fn(toclipboard) then table.insert(fns, toclipboard) end
+        if type(Clipboard) == "table" and fn(Clipboard.set) then table.insert(fns, Clipboard.set) end
+        for _, f in ipairs(fns) do
+            if pcall(f, text) then return true end
+        end
+        return false
+    end
+    local function filesWork()
+        return (pcall(function()
+            local dir = "LegacyTD"
+            if not isfolder(dir) then makefolder(dir) end
+            local path_ = dir .. "/_check.txt"
+            writefile(path_, "ok")
+            local back = readfile(path_)
+            delfile(path_)
+            local list = listfiles(dir)
+            assert(back == "ok" and type(list) == "table" and isfile ~= nil)
+        end))
+    end
+    local clipboardOk = fn(setclipboard) or fn(toclipboard) or (type(Clipboard) == "table" and fn(Clipboard.set))
+    local rows = {
+        {
+            label = "Saving configs and macros",
+            funcs = {
+                {"writefile", fn(writefile)}, {"readfile", fn(readfile)}, {"listfiles", fn(listfiles)},
+                {"delfile", fn(delfile)}, {"isfile", fn(isfile)}, {"isfolder", fn(isfolder)}, {"makefolder", fn(makefolder)},
+            },
+            test = filesWork,
+            hint = "Everything is kept only until you leave the game",
+        },
+        {
+            label = "Clipboard",
+            funcs = {{"setclipboard", clipboardOk}},
+            hint = "Copy buttons show the text instead",
+        },
+    }
+    local lines = {}
+    local supported = true
+    for _, r in ipairs(rows) do
+        local allPresent = true
+        for _, f in ipairs(r.funcs) do
+            if not f[2] then allPresent = false end
+        end
+        local testPassed = allPresent and (not r.test or r.test())
+        if not testPassed then supported = false end
+        for _, f in ipairs(r.funcs) do
+            local ok = f[2] and testPassed
+            table.insert(lines, f[1] .. " " .. (ok and "\226\156\133" or "\226\157\140"))
+        end
+    end
+    local hasQueue = fn(queue_on_teleport) or (type(syn) == "table" and fn(syn.queue_on_teleport))
+        or (type(fluxus) == "table" and fn(fluxus.queue_on_teleport))
+    local hasRequest = fn(request) or fn(http_request) or (type(syn) == "table" and fn(syn.request))
+        or (type(http) == "table" and fn(http.request)) or (type(fluxus) == "table" and fn(fluxus.request))
+    for _, e in ipairs({
+        {"hookfunction", fn(hookfunction)}, {"checkcaller", fn(checkcaller)}, {"newcclosure", fn(newcclosure)}, {"getgenv", fn(getgenv)},
+        {"queue_on_teleport", hasQueue}, {"request", hasRequest}, {"setfpscap", fn(setfpscap)},
+    }) do
+        table.insert(lines, e[1] .. " " .. (e[2] and "\226\156\133" or "\226\157\140"))
+    end
+    local who = lp.Name
+    if lp.DisplayName ~= lp.Name then who = lp.DisplayName .. " (@" .. lp.Name .. ")" end
+    local statusWord = supported and UI.Rich("Supported", GREEN) or UI.Rich("Not supported", RED)
+    local statusTab = Win:AddTab("Status", {Icon = "info"})
+    local infoSec = statusTab:AddSection("Info")
+    infoSec:AddLabel({
+        Text = table.concat({
+            "User: <b>" .. esc(who) .. "</b>",
+            "Current executor: <b>" .. esc(executorName()) .. "</b>",
+            "Executor status: <b>" .. statusWord .. "</b>",
+        }, "\n"),
+        Color = "Text",
+    })
+    local checkSec = statusTab:AddSection("Executor checks")
+    checkSec:AddParagraph({
+        Title = supported and UI.Rich("All features are available", GREEN) or UI.Rich("Some features are not available", RED),
+        Content = table.concat(lines, "\n"),
+    })
+    local linkSec = statusTab:AddSection("Community")
+    linkSec:AddButton({
+        Name = "Copy discord server link", Style = "Accent",
+        Callback = function()
+            if copyText(DISCORD_LINK) then
+                UI:Notify({Title = "Discord", Content = "Server link copied", Duration = 3, Type = "Success"})
+            else
+                UI:Notify({Title = "Discord", Content = "Clipboard is not supported here: " .. DISCORD_LINK, Duration = 6, Type = "Warning"})
+            end
+        end,
+    })
+    linkSec:AddLabel({Text = DISCORD_LINK})
+end
+local mainTab = Win:AddTab("Main", {Icon = "box"})
+local autoSec = mainTab:AddSection("Match")
+local autoGrid = autoSec:AddGrid({Columns = 2, CellHeight = 34})
+autoGrid:AddToggle({
+    Name = "Auto Skip", Flag = "autoSkip", Tooltip = "Votes to skip the wave the moment the skip button appears (match only)",
+    Callback = function(v)
+        cfg.autoSkip = v
+        st.skipWindow, st.skipTries = false, 0
+        if v then MT.trySkip() end
+    end,
+})
+autoGrid:AddToggle({
+    Name = "Auto Vote Mode", Flag = "autoVote", Tooltip = "Votes for the selected mode on the vote screen (match only)",
+    Callback = function(v)
+        cfg.autoVote = v
+        st.voteTries = 0
+    end,
+})
+autoGrid:AddToggle({
+    Name = "Auto Sell Farms", Flag = "autoSellFarm",
+    Tooltip = "Sells every unit that pays extra income once the wave from Game Options is reached, so you get the refund and keep the cash (match only)",
+    Callback = function(v)
+        cfg.autoSellFarm = v
+        if v and not MT.liveSellWave() then flash("Auto Sell Farms: enter the wave first (e.g. 50)", "Warning") end
+        if v then MT.checkFarmSell() end
+    end,
+})
+local optSec = mainTab:AddSection("Game Options")
+optSec:AddDropdown({
+    Name = "Mode Vote", Flag = "mode", Options = MODES, Default = cfg.mode, Searchable = false,
+    Callback = function(v)
+        cfg.mode = tostring(v)
+        st.voteTries = 0
+    end,
+})
+optSec:AddDropdown({
+    Name = "After Match", Flag = "endAction", Options = END_ACTIONS, Default = cfg.endAction, Searchable = false,
+    Tooltip = "What happens on the result screen. None: nothing. Replay: presses Play Again. Lobby: returns to the lobby",
+    Callback = function(v)
+        cfg.endAction = (v == "Replay" or v == "Lobby") and v or "None"
+    end,
+})
+skipBarrierInput = optSec:AddInput({
+    Name = "Skip Barriers", Flag = "skipBarriers", Placeholder = "e.g. 10, 25, 40",
+    Tooltip = "Waves that Auto Skip will not touch, separated by commas. Each barrier wave plays out on its own, skipping resumes on the next wave. Empty = no barriers",
+    Callback = function(v)
+        local set, list = parseBarriers(v)
+        cfg.skipBarriers = set
+        if skipBarrierInput then skipBarrierInput:Set(table.concat(list, ", "), true) end
+    end,
+})
+sellFarmInput = optSec:AddInput({
+    Name = "Sell Farms On Wave", Flag = "sellFarmWave", Placeholder = "e.g. 50",
+    Tooltip = "Wave on which Auto Sell Farms starts selling. Minimum 1. Empty = never sells. Can be changed during a match",
+    Callback = function(v)
+        local w = parseWave(v)
+        cfg.sellFarmWave = (w >= 1) and w or nil
+        if sellFarmInput then sellFarmInput:Set(w >= 1 and tostring(w) or "", true) end
+    end,
+})
+optSec:AddSlider({
+    Name = "Sell Farms Delay", Flag = "sellFarmDelay", Min = 0.1, Max = 10, Default = cfg.sellFarmDelay, Step = 0.1, Suffix = "s",
+    Tooltip = "Pause between two farm sales",
+    Callback = function(v) cfg.sellFarmDelay = math.clamp(tonumber(v) or 0.1, 0.1, 10) end,
+})
+local lobbySec = mainTab:AddSection("Lobby")
+local lobbyGrid = lobbySec:AddGrid({Columns = 2, CellHeight = 34})
+LB.tg1 = lobbyGrid:AddToggle({
+    Name = "Auto Summon 1", Flag = "autoSummon1", Tooltip = "Summons one unit at a time, nonstop (lobby only)",
+    Callback = function(v)
+        cfg.autoSummon1 = v
+        if v and cfg.autoSummon10 then
+            cfg.autoSummon10 = false
+            if LB.tg10 then LB.tg10:Set(false, true) end
+            flash("Auto Summon 10 turned off: Summon 1 is on")
+        end
+        LB.sumFails, LB.sumMoved = 0, false
+    end,
+})
+LB.tg10 = lobbyGrid:AddToggle({
+    Name = "Auto Summon 10", Flag = "autoSummon10", Tooltip = "Summons ten units per request, nonstop (lobby only)",
+    Callback = function(v)
+        cfg.autoSummon10 = v
+        if v and cfg.autoSummon1 then
+            cfg.autoSummon1 = false
+            if LB.tg1 then LB.tg1:Set(false, true) end
+            flash("Auto Summon 1 turned off: Summon 10 is on")
+        end
+        LB.sumFails, LB.sumMoved = 0, false
+    end,
+})
+lobbySec:AddSlider({
+    Name = "Summon Delay", Flag = "summonDelay", Min = 0.5, Max = 5, Default = cfg.summonDelay, Step = 0.1, Suffix = "s",
+    Tooltip = "Pause between two summon requests. It also waits for the summon animation to finish",
+    Callback = function(v) cfg.summonDelay = math.clamp(tonumber(v) or 1.5, 0.5, 5) end,
+})
+local sellGrid2 = lobbySec:AddGrid({Columns = 2, CellHeight = 34})
+for _, rarity in ipairs(SELL_RARITIES) do
+    sellGrid2:AddToggle({
+        Name = "Auto Sell " .. rarity, Flag = "summonSell" .. rarity,
+        Tooltip = "Units of this rarity are sold right after every summon (lobby only)",
+        Callback = function(v) cfg.summonSell[rarity] = v end,
+    })
+end
+lobbySec:AddToggle({
+    Name = "Auto Claim Quests", Flag = "autoClaimQuests", Tooltip = "Claims finished daily and weekly quests (lobby only)",
+    Callback = function(v)
+        cfg.autoClaimQuests = v
+        if v then task.spawn(LB.claimQuests) end
+    end,
+})
+lobbySec:AddToggle({
+    Name = "Auto Teleport To Map", Flag = "autoTeleport",
+    Tooltip = "Steps into a free lift of the selected map and starts it (lobby only)",
+    Callback = function(v)
+        cfg.autoTeleport = v
+        if v then
+            LB.tpNext = 0
+        elseif LB.lead or LB.entered then
+            LB.leave()
+        end
+    end,
+})
+lobbySec:AddDropdown({
+    Name = "Map", Flag = "teleportMap", Options = MAP_NAMES, Default = cfg.teleportMap, Searchable = false,
+    Callback = function(v)
+        if MAP_BY_NAME[tostring(v)] == nil then return end
+        cfg.teleportMap = tostring(v)
+        if LB.lead then LB.leave() end
+        LB.tpNext = 0
+    end,
+})
+lobbySec:AddDropdown({
+    Name = "Players", Flag = "teleportPlayers",
+    Options = {"1 Player", "2 Players", "3 Players", "4 Players"},
+    Default = cfg.teleportPlayers .. (cfg.teleportPlayers == 1 and " Player" or " Players"), Searchable = false,
+    Tooltip = "Minimum number of players in the lift before it is started",
+    Callback = function(v)
+        cfg.teleportPlayers = math.clamp(tonumber(tostring(v):match("%d+")) or 1, 1, 4)
+        LB.tpNext = 0
+    end,
+})
+local invSec = mainTab:AddSection("Inventory")
+INV.w.sellInfo = invSec:AddParagraph({Title = "Unit sell", Content = "Select a unit, then choose an action. Equipped, locked and signed copies are skipped."})
+INV.w.sellSel = invSec:AddDropdown({
+    Name = "Inventory Unit", Options = {"(select a unit)"}, Default = "(select a unit)", NoSave = true,
+    Tooltip = "Units from your inventory with copy counts (lobby only)",
+    Callback = function(v)
+        if INV.refreshing then return end
+        INV.sellName = INV.sellLabels[v]
+        INV.refreshSell()
+    end,
+})
+local sellGrid = invSec:AddGrid({Columns = 3, CellHeight = 34})
+sellGrid:AddButton({Name = "Sell All", Style = "Danger", Callback = function() INV.sell("All") end})
+sellGrid:AddButton({Name = "Sell x1", Style = "Danger", Callback = function() INV.sell("One") end})
+sellGrid:AddButton({Name = "Keep One", Style = "Danger", Callback = function() INV.sell("KeepOne") end})
+invSec:AddDivider()
+INV.w.crateInfo = invSec:AddParagraph({Title = "Crates", Content = "Auto Open Crate is off."})
+INV.w.crateSel = invSec:AddDropdown({
+    Name = "Open Crate", Options = {INV.noCrates}, Default = INV.noCrates, NoSave = true, Searchable = false,
+    Tooltip = "Crates from your inventory with copy counts (lobby only)",
+    Callback = function(v)
+        if INV.refreshing then return end
+        local name = INV.crateLabels[v]
+        if name then cfg.openCrateName = name end
+    end,
+})
+invSec:AddDropdown({
+    Name = "Open Amount", Flag = "openCrateAmount", Options = {"x1", "x10"}, Default = "x" .. cfg.openCrateAmount, Searchable = false,
+    Tooltip = "x10 is used only when you own at least ten crates of the type",
+    Callback = function(v) cfg.openCrateAmount = (v == "x10") and 10 or 1 end,
+})
+invSec:AddSlider({
+    Name = "Open Delay", Flag = "crateDelay", Min = 1, Max = 10, Default = cfg.crateDelay, Step = 0.5, Suffix = "s",
+    Tooltip = "Pause between two crate openings",
+    Callback = function(v) cfg.crateDelay = math.clamp(tonumber(v) or 1.5, 1, 10) end,
+})
+invSec:AddToggle({
+    Name = "Auto Open Crate", Flag = "autoOpenCrate", Tooltip = "Opens the selected crate while the unit inventory has space (lobby only)",
+    Callback = function(v) cfg.autoOpenCrate = v end,
+})
+local macroTab = Win:AddTab("Macro", {Icon = "circle-dot"})
+local recSec = macroTab:AddSection("Recorder")
+local recGrid = recSec:AddGrid({Columns = 2, CellHeight = 34})
+recToggle = recGrid:AddToggle({
+    Name = "Record", NoSave = true,
+    Tooltip = "Records everything you do by hand: placing (with rotation), upgrades, sells, target changes, unit abilities and wave skips. Saved by itself when the round ends (macro #1, #2, ... or the typed name)",
+    Callback = function(v)
+        if v then
+            if not IN_MATCH then
+                flash("Record works inside a match", "Warning")
+                recToggle:Set(false, true)
+                return
+            end
+            if not mc.ok then
+                flash("Macro unavailable: game remotes missing", "Error")
+                recToggle:Set(false, true)
+                return
+            end
+            if mc.play then
+                flash("Turn Play Macro off first", "Warning")
+                recToggle:Set(false, true)
+                return
+            end
+            mc.hook = installHook()
+            if not mc.hook then
+                flash("Recording failed: the game network could not be hooked", "Error")
+                recToggle:Set(false, true)
+                return
+            end
+            resetRecorder()
+            mc.map = currentMap()
+            mc.rec = true
+            if TR.count() > 0 then
+                flash("Units already on the field are not recorded: start with an empty field", "Warning")
+            end
+            local prev = mc.selected
+            mc.selected = nil
+            if macroDD then macroDD:Set(nil, true) end
+            if prev and nameInput and sanitize(nameInput:Get()) == prev then nameInput:Set("", true) end
+            flash("Recording: it is saved by itself when the round ends")
+        else
+            if #mc.steps > 0 and finishRecording then
+                finishRecording("Recording stopped")
+            else
+                mc.rec = false
+                MT.clearStamps()
+                flash("Recording stopped: " .. #mc.steps .. " steps")
+            end
+        end
+    end,
+})
+playToggle = recGrid:AddToggle({
+    Name = "Play Macro", Flag = "playMacro",
+    Tooltip = "Replays the selected macro in every match. Units are bought and upgraded the moment there is enough money; sells, abilities and skips keep their wave and time. Saved in configs: autofarm starts by itself",
+    Callback = function(v)
+        if v then
+            if mc.initDone and not mc.ok and IN_MATCH then
+                flash("Macro unavailable: game remotes missing", "Error")
+                playToggle:Set(false, true)
+                return
+            end
+            if mc.rec then
+                flash("Turn Record off first", "Warning")
+                playToggle:Set(false, true)
+                return
+            end
+            if #mc.steps == 0 or not mc.selected then
+                flash("No macro selected: pick a saved macro first", "Warning")
+                playToggle:Set(false, true)
+                return
+            end
+            mc.play = true
+            mc.ranMatch = nil
+            flash("Macro armed: it replays every match", "Success")
+        else
+            mc.play = false
+        end
+    end,
+})
+recSec:AddDropdown({
+    Name = "Replay Mode", Flag = "replayMode", Options = {"Hybrid", "Money", "Time"}, Default = "Hybrid",
+    Tooltip = "Hybrid: every step waits for its recorded wave, then for enough money. Money: only money, as soon as it is there (recorded skips are ignored). Time: every step waits for its recorded wave and moment inside it, so the run repeats the original recording",
+    Callback = function(v)
+        if v == "Hybrid" or v == "Money" or v == "Time" then mc.replay = v end
+    end,
+})
+recSec:AddToggle({
+    Name = "Auto Save After The Match Ends", Flag = "autoSaveRec", Default = true,
+    Tooltip = "Saves the recording by itself when the round ends. When off, the steps stay loaded and you save them with the Save button",
+    Callback = function(v) mc.autoSave = v end,
+})
+macroStatus = recSec:AddLabel({Text = "steps <b>0</b> | wave <b>0</b> | $<b>0</b>"})
+recSec:AddButton({
+    Name = "Clear Steps", Style = "Danger",
+    Callback = function()
+        if mc.play or mc.rec then
+            flash("Turn Record / Play off first", "Warning")
+            return
+        end
+        mc.steps = {}
+        mc.map = nil
+        mc.selected = nil
+        if macroDD then macroDD:Set(nil, true) end
+        flash("Steps cleared")
+    end,
+})
+local libSec = macroTab:AddSection("Saved Macros")
+macroDD = libSec:AddDropdown({
+    Name = "Macro", Flag = "macro", Options = MAC.list(),
+    Tooltip = "Pick a saved macro: it is loaded right away, then press Play Macro",
+    Callback = function(name)
+        if mc.play or mc.rec then
+            flash("Turn Record / Play off first", "Warning")
+            macroDD:Set(mc.selected, true)
+            return
+        end
+        loadMacro(name)
+    end,
+})
+nameInput = libSec:AddInput({Name = "Name", Flag = "macroName", Placeholder = "macro name"})
+local macGrid = libSec:AddGrid({Columns = 2, CellHeight = 34})
+macGrid:AddButton({Name = "Save", Style = "Accent", Callback = saveMacro})
+macGrid:AddButton({Name = "Delete", Style = "Danger", Callback = deleteMacro})
+macroTab:AddButton({Name = "Copy Selected As JSON", Callback = exportMacro})
+
+local impSec = macroTab:AddSection("Import Macro")
+importName = impSec:AddInput({
+    Name = "Macro Name", Flag = "importName", NoSave = true, Placeholder = "name (optional)",
+    Tooltip = "Name for the imported macro. Empty: the name from the JSON, or macro #N",
+})
+importJson = impSec:AddInput({
+    Name = "Macro JSON", Flag = "importJson", NoSave = true, Placeholder = "paste macro JSON here",
+    Tooltip = "Paste the exported macro JSON, then press Import. The macro only plays on the map it was recorded on",
+})
+local impGrid = impSec:AddGrid({Columns = 2, CellHeight = 34})
+impGrid:AddButton({Name = "Import", Style = "Accent", Callback = importMacro})
+impGrid:AddButton({Name = "Clear", Callback = function()
+    importJson:Set("", true)
+    importName:Set("", true)
+end})
+local discordTab = Win:AddTab("Webhook", {Icon = "webhook"})
+local whSec = discordTab:AddSection("Discord")
+whSec:AddInput({
+    Name = "Webhook URL", Flag = "whUrl", Placeholder = "https://discord.com/api/webhooks/...",
+    Tooltip = "Discord: channel settings > Integrations > Webhooks > New Webhook > Copy Webhook URL",
+    Callback = function(v) WH.url = WH.clean(v) end,
+})
+whSec:AddInput({
+    Name = "Big Image URL", Flag = "whImage", Placeholder = "Empty = built-in banner",
+    Tooltip = "Direct link to the large banner at the bottom of every webhook message. Empty = built-in banner",
+    Callback = function(v) WH.image = WH.clean(v) end,
+})
+whSec:AddInput({
+    Name = "Footer Icon URL", Flag = "whIcon", Placeholder = "Empty = built-in icon",
+    Tooltip = "Direct link to the small icon before \"Made By Diamond Hub\". Empty = built-in icon",
+    Callback = function(v) WH.icon = WH.clean(v) end,
+})
+whSec:AddToggle({
+    Name = "Enable Webhook", Flag = "whEnabled", Default = false,
+    Tooltip = "Turns Discord messages on or off",
+    Callback = function(v) WH.enabled = v end,
+})
+whSec:AddToggle({
+    Name = "Notify On Match End", Flag = "whOnEnd", Default = true,
+    Tooltip = "Sends the result of every match: victory or defeat, stage, mode, wave, time, rewards and account totals",
+    Callback = function(v) WH.onEnd = v end,
+})
+whSec:AddButton({
+    Name = "Send Test Message", Style = "Accent",
+    Callback = function() WH.send(nil, WH.snapshot(), false) end,
+})
+local PRIV = {
+    nameOrig = setmetatable({}, {__mode = "k"}), nameWatched = setmetatable({}, {__mode = "k"}), nameConns = {},
+    userSaved = {}, userGen = 0, fpsOrig = setmetatable({}, {__mode = "k"}), conns = {},
+}
+if genv.ld_privDestroy then pcall(genv.ld_privDestroy) end
+PRIV.Lighting = game:GetService("Lighting")
+PRIV.Workspace = game:GetService("Workspace")
+
+function PRIV.nameRestore()
+    for inst, props in pairs(PRIV.nameOrig) do
+        pcall(function()
+            for k, v in pairs(props) do inst[k] = v end
+        end)
+    end
+    PRIV.nameOrig = setmetatable({}, {__mode = "k"})
+end
+function PRIV.ownText(s)
+    s = tostring(s or ""):match("^%s*(.-)%s*$")
+    return s == lp.Name or (lp.DisplayName ~= "" and s == lp.DisplayName) or s == "@" .. lp.Name
+end
+function PRIV.nameObject(o)
+    if o:IsA("Humanoid") then
+        if not PRIV.nameOrig[o] then
+            PRIV.nameOrig[o] = {DisplayName = o.DisplayName, NameDisplayDistance = o.NameDisplayDistance}
+        end
+        o.NameDisplayDistance = 0
+        o.DisplayName = ""
+    elseif (o:IsA("TextLabel") or o:IsA("TextButton")) and o:FindFirstAncestorWhichIsA("BillboardGui") then
+        local t = o.Text
+        if t:find(lp.Name, 1, true) or (lp.DisplayName ~= "" and t:find(lp.DisplayName, 1, true)) then
+            if not PRIV.nameOrig[o] then
+                PRIV.nameOrig[o] = {Visible = o.Visible, TextTransparency = o.TextTransparency,
+                    TextStrokeTransparency = o.TextStrokeTransparency}
+            end
+            o.Visible = false
+            o.TextTransparency, o.TextStrokeTransparency = 1, 1
+        end
+    end
+end
+function PRIV.nameWatch(l)
+    if PRIV.nameWatched[l] then return end
+    if not (l:IsA("TextLabel") or l:IsA("TextButton")) then return end
+    local g = l:FindFirstAncestorWhichIsA("ScreenGui")
+    if g and UI.IsOwnGui(g) then return end
+    PRIV.nameWatched[l] = true
+    local function apply()
+        local o = PRIV.nameOrig[l]
+        if PRIV.ownText(l.Text) then
+            if not o then
+                o = {Visible = l.Visible, TextTransparency = l.TextTransparency,
+                    TextStrokeTransparency = l.TextStrokeTransparency}
+                PRIV.nameOrig[l] = o
+            end
+            l.Visible = false
+            l.TextTransparency, l.TextStrokeTransparency = 1, 1
+        elseif o then
+            l.Visible, l.TextTransparency, l.TextStrokeTransparency = o.Visible, o.TextTransparency, o.TextStrokeTransparency
+            PRIV.nameOrig[l] = nil
+        end
+    end
+    table.insert(PRIV.nameConns, l:GetPropertyChangedSignal("Text"):Connect(apply))
+    apply()
+end
+function PRIV.nameBind(char)
+    for _, c in ipairs(PRIV.nameConns) do pcall(function() c:Disconnect() end) end
+    PRIV.nameConns = {}
+    PRIV.nameWatched = setmetatable({}, {__mode = "k"})
+    PRIV.nameRestore()
+    if not cfg.hideName then return end
+    if char then
+        for _, d in ipairs(char:GetDescendants()) do pcall(PRIV.nameObject, d) end
+        table.insert(PRIV.nameConns, char.DescendantAdded:Connect(function(d)
+            if alive() and cfg.hideName and lp.Character == char then pcall(PRIV.nameObject, d) end
+        end))
+    end
+    local function watchRoot(root)
+        for _, d in ipairs(root:GetDescendants()) do pcall(PRIV.nameWatch, d) end
+        table.insert(PRIV.nameConns, root.DescendantAdded:Connect(function(d)
+            if alive() and cfg.hideName then pcall(PRIV.nameWatch, d) end
+        end))
+    end
+    watchRoot(pg)
+    pcall(function() watchRoot(game:GetService("CoreGui")) end)
+end
+function PRIV.setName(v)
+    cfg.hideName = v and true or false
+    PRIV.nameBind(cfg.hideName and lp.Character or nil)
+end
+
+function PRIV.userClear()
+    for inst, props in pairs(PRIV.userSaved) do
+        pcall(function()
+            for k, v in pairs(props) do inst[k] = v end
+        end)
+    end
+    PRIV.userSaved = {}
+end
+function PRIV.userApply(char)
+    PRIV.userGen = PRIV.userGen + 1
+    local gen = PRIV.userGen
+    if PRIV.userConn then
+        PRIV.userConn:Disconnect()
+        PRIV.userConn = nil
+    end
+    PRIV.userClear()
+    if not (cfg.hideUser and char) then return end
+    local RED = Color3.fromRGB(255, 0, 0)
+    local function hit(i)
+        if PRIV.userSaved[i] or not i:IsDescendantOf(char) then return end
+        local set
+        if i:IsA("Accessory") or i:IsA("Shirt") or i:IsA("Pants") or i:IsA("ShirtGraphic") or i:IsA("CharacterMesh") then
+            set = {Parent = false}
+        elseif i:IsA("BasePart") and i.Parent == char and i.Name ~= "HumanoidRootPart" then
+            set = {Color = RED}
+            if i:IsA("MeshPart") then set.TextureID = "" end
+        elseif i:IsA("BodyColors") then
+            set = {HeadColor3 = RED, TorsoColor3 = RED, LeftArmColor3 = RED, RightArmColor3 = RED,
+                LeftLegColor3 = RED, RightLegColor3 = RED}
+        elseif i:IsA("SpecialMesh") and i.Parent and i.Parent.Parent == char then
+            set = {TextureId = ""}
+        elseif i:IsA("SurfaceAppearance") and i.Parent and i.Parent.Parent == char then
+            set = {Parent = false}
+        end
+        if not set then return end
+        local saved = {}
+        PRIV.userSaved[i] = saved
+        for k, v in pairs(set) do
+            pcall(function()
+                saved[k] = i[k]
+                if k == "Parent" then i.Parent = nil else i[k] = v end
+            end)
+        end
+    end
+    PRIV.userConn = char.DescendantAdded:Connect(function(d)
+        task.defer(function()
+            if alive() and cfg.hideUser and gen == PRIV.userGen then pcall(hit, d) end
+        end)
+    end)
+    for _, d in ipairs(char:GetDescendants()) do pcall(hit, d) end
+end
+function PRIV.setUser(v)
+    cfg.hideUser = v and true or false
+    PRIV.userApply(cfg.hideUser and lp.Character or nil)
+end
+
+function PRIV.fpsSet(inst, prop, val)
+    local o = PRIV.fpsOrig[inst]
+    if not o then
+        o = {}
+        PRIV.fpsOrig[inst] = o
+    end
+    if o[prop] == nil then
+        local ok, cur = pcall(function() return inst[prop] end)
+        if ok then o[prop] = cur end
+    end
+    pcall(function() inst[prop] = val end)
+end
+function PRIV.fpsObject(o)
+    if o:IsA("ParticleEmitter") or o:IsA("Trail") or o:IsA("Beam") or o:IsA("Smoke") or o:IsA("Fire")
+        or o:IsA("Sparkles") or o:IsA("PostEffect") then
+        PRIV.fpsSet(o, "Enabled", false)
+    elseif o:IsA("BasePart") then
+        PRIV.fpsSet(o, "CastShadow", false)
+        PRIV.fpsSet(o, "Material", Enum.Material.SmoothPlastic)
+    elseif o:IsA("Decal") or o:IsA("Texture") then
+        PRIV.fpsSet(o, "Transparency", 1)
+    end
+end
+function PRIV.fpsEnqueue(inst)
+    local q = PRIV.fpsQ
+    if not q then
+        q = {}
+        PRIV.fpsQ = q
+        task.defer(function()
+            local i, t0 = 1, os.clock()
+            while alive() and cfg.fpsBoost and PRIV.fpsQ == q and i <= #q do
+                local o = q[i]
+                if o.Parent then pcall(PRIV.fpsObject, o) end
+                i = i + 1
+                if i % 16 == 0 and os.clock() - t0 >= 0.002 then
+                    task.wait()
+                    t0 = os.clock()
+                end
+            end
+            if PRIV.fpsQ == q then PRIV.fpsQ = nil end
+        end)
+    end
+    q[#q + 1] = inst
+end
+function PRIV.setFps(on)
+    cfg.fpsBoost = on and true or false
+    PRIV.fpsGen = (PRIV.fpsGen or 0) + 1
+    local gen = PRIV.fpsGen
+    if cfg.fpsBoost then
+        PRIV.fpsSet(PRIV.Lighting, "GlobalShadows", false)
+        task.spawn(function()
+            local t0, n = os.clock(), 0
+            for _, root in ipairs({PRIV.Workspace, PRIV.Lighting}) do
+                for _, d in ipairs(root:GetDescendants()) do
+                    if not (alive() and cfg.fpsBoost and PRIV.fpsGen == gen) then return end
+                    pcall(PRIV.fpsObject, d)
+                    n = n + 1
+                    if n % 16 == 0 and os.clock() - t0 >= 0.002 then
+                        task.wait()
+                        t0 = os.clock()
+                    end
+                end
+            end
+        end)
+    else
+        PRIV.fpsQ = nil
+        local orig = PRIV.fpsOrig
+        PRIV.fpsOrig = setmetatable({}, {__mode = "k"})
+        task.spawn(function()
+            local n = 0
+            for inst, props in pairs(orig) do
+                pcall(function()
+                    for k, v in pairs(props) do inst[k] = v end
+                end)
+                n = n + 1
+                if n % 200 == 0 then task.wait() end
+            end
+        end)
+    end
+end
+table.insert(PRIV.conns, lp.CharacterAdded:Connect(function(c)
+    if not alive() then return end
+    if cfg.hideName then PRIV.nameBind(c) end
+    if cfg.hideUser then PRIV.userApply(c) end
+end))
+for _, svc in ipairs({PRIV.Workspace, PRIV.Lighting}) do
+    table.insert(PRIV.conns, svc.DescendantAdded:Connect(function(d)
+        if alive() and cfg.fpsBoost then PRIV.fpsEnqueue(d) end
+    end))
+end
+genv.ld_privDestroy = function()
+    cfg.hideName, cfg.hideUser, cfg.fpsBoost = false, false, false
+    pcall(PRIV.nameBind, nil)
+    pcall(PRIV.userApply, nil)
+    pcall(PRIV.setFps, false)
+    for _, c in ipairs(PRIV.conns) do pcall(function() c:Disconnect() end) end
+end
+local MISC = {fpsCap = 60, fbSaved = {}, fbConns = {}, nfSaved = {}, nfConns = {}, nfAtmo = {}}
+function MISC.antiAfk(on)
+    if on then
+        if MISC.afkConn then return end
+        MISC.afkConn = lp.Idled:Connect(function()
+            local vu = game:GetService("VirtualUser")
+            vu:CaptureController()
+            vu:ClickButton2(Vector2.new())
+        end)
+    elseif MISC.afkConn then
+        MISC.afkConn:Disconnect()
+        MISC.afkConn = nil
+    end
+end
+function MISC.applyFps()
+    if type(setfpscap) ~= "function" then return end
+    pcall(setfpscap, MISC.fpsOn and MISC.fpsCap or 60)
+end
+function MISC.blackScreen(on)
+    local RS = game:GetService("RunService")
+    if on then
+        if MISC.bsGui then return end
+        local gui = Instance.new("ScreenGui")
+        gui.Name = "DH_BlackScreen"
+        gui.IgnoreGuiInset = true
+        gui.ResetOnSpawn = false
+        gui.DisplayOrder = 100
+        gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+        local fr = Instance.new("Frame")
+        fr.Size = UDim2.fromScale(1, 1)
+        fr.BackgroundColor3 = Color3.new(0, 0, 0)
+        fr.BorderSizePixel = 0
+        fr.Active = false
+        fr.Parent = gui
+        local ok = pcall(function()
+            gui.Parent = (type(gethui) == "function" and gethui()) or game:GetService("CoreGui")
+        end)
+        if not (ok and gui.Parent) then gui.Parent = lp:WaitForChild("PlayerGui") end
+        MISC.bsGui = gui
+        pcall(RS.Set3dRenderingEnabled, RS, false)
+        MISC.bsConn = RS.Heartbeat:Connect(function()
+            if not alive() then MISC.blackScreen(false) end
+        end)
+    else
+        if MISC.bsConn then MISC.bsConn:Disconnect() MISC.bsConn = nil end
+        if MISC.bsGui then MISC.bsGui:Destroy() MISC.bsGui = nil end
+        pcall(RS.Set3dRenderingEnabled, RS, true)
+    end
+end
+local FULLBRIGHT = {
+    Brightness = 1,
+    ClockTime = 12,
+    FogEnd = 786543,
+    GlobalShadows = false,
+    Ambient = Color3.fromRGB(178, 178, 178),
+}
+function MISC.fullBright(on)
+    local lighting = game:GetService("Lighting")
+    if on then
+        if MISC.fbOn then return end
+        MISC.fbOn = true
+        for prop, val in pairs(FULLBRIGHT) do
+            MISC.fbSaved[prop] = lighting[prop]
+            lighting[prop] = val
+            MISC.fbConns[prop] = lighting:GetPropertyChangedSignal(prop):Connect(function()
+                if lighting[prop] ~= val then
+                    MISC.fbSaved[prop] = lighting[prop]
+                    lighting[prop] = val
+                end
+            end)
+        end
+    else
+        if not MISC.fbOn then return end
+        MISC.fbOn = false
+        for prop, conn in pairs(MISC.fbConns) do conn:Disconnect() end
+        MISC.fbConns = {}
+        for prop, val in pairs(MISC.fbSaved) do lighting[prop] = val end
+        MISC.fbSaved = {}
+    end
+end
+function MISC.noclip(on)
+    if on then
+        if MISC.ncConn then return end
+        MISC.ncTouched = setmetatable({}, {__mode = "k"})
+        MISC.ncConn = game:GetService("RunService").Stepped:Connect(function()
+            local char = lp.Character
+            if not char then return end
+            for _, part in ipairs(char:GetDescendants()) do
+                if part:IsA("BasePart") and part.CanCollide then
+                    MISC.ncTouched[part] = true
+                    part.CanCollide = false
+                end
+            end
+        end)
+    elseif MISC.ncConn then
+        MISC.ncConn:Disconnect()
+        MISC.ncConn = nil
+        for part in pairs(MISC.ncTouched) do
+            if part.Parent then part.CanCollide = true end
+        end
+        MISC.ncTouched = nil
+    end
+end
+MISC.walkSpeed = 32
+function MISC.speed(on)
+    if on then
+        if MISC.spConn then return end
+        MISC.spConn = game:GetService("RunService").Heartbeat:Connect(function()
+            local char = lp.Character
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            if not hum then return end
+            if not MISC.spBase then MISC.spBase = hum.WalkSpeed end
+            if hum.WalkSpeed ~= MISC.walkSpeed then hum.WalkSpeed = MISC.walkSpeed end
+        end)
+    elseif MISC.spConn then
+        MISC.spConn:Disconnect()
+        MISC.spConn = nil
+        local char = lp.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if hum then hum.WalkSpeed = MISC.spBase or 16 end
+        MISC.spBase = nil
+    end
+end
+MISC.flySpeed = 60
+function MISC.fly(on)
+    local RS = game:GetService("RunService")
+    local UIS = game:GetService("UserInputService")
+    local K = Enum.KeyCode
+    local function key(k) return UIS:IsKeyDown(k) end
+    local function cleanup()
+        if MISC.flyBV then MISC.flyBV:Destroy() MISC.flyBV = nil end
+        if MISC.flyBG then MISC.flyBG:Destroy() MISC.flyBG = nil end
+    end
+    if on then
+        if MISC.flyConn then return end
+        MISC.flyCtl = false
+        pcall(function()
+            local pm = lp.PlayerScripts:FindFirstChild("PlayerModule")
+            if pm then MISC.flyCtl = require(pm):GetControls() end
+        end)
+        MISC.flyConn = RS.RenderStepped:Connect(function()
+            if not alive() then MISC.fly(false) return end
+            local char = lp.Character
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            local root = char and char:FindFirstChild("HumanoidRootPart")
+            local cam = workspace.CurrentCamera
+            if not (hum and root and cam) then return end
+            if not MISC.flyBV or MISC.flyBV.Parent ~= root or not MISC.flyBG or MISC.flyBG.Parent ~= root then
+                cleanup()
+                local bg = Instance.new("BodyGyro")
+                bg.Name = "DH_FlyGyro"
+                bg.P = 9e4
+                bg.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+                bg.CFrame = root.CFrame
+                bg.Parent = root
+                local bv = Instance.new("BodyVelocity")
+                bv.Name = "DH_FlyVel"
+                bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+                bv.Velocity = Vector3.new(0, 0.1, 0)
+                bv.Parent = root
+                MISC.flyBG, MISC.flyBV = bg, bv
+            end
+            if not hum.PlatformStand then hum.PlatformStand = true end
+            local mv
+            if MISC.flyCtl then
+                local ok, v = pcall(function() return MISC.flyCtl:GetMoveVector() end)
+                if ok and typeof(v) == "Vector3" then mv = v end
+            end
+            if not mv then
+                mv = Vector3.new((key(K.D) and 1 or 0) - (key(K.A) and 1 or 0), 0, (key(K.S) and 1 or 0) - (key(K.W) and 1 or 0))
+            end
+            local cf = cam.CFrame
+            local dir = cf.RightVector * mv.X + cf.LookVector * (-mv.Z)
+            if key(K.E) or key(K.Space) then dir = dir + Vector3.yAxis end
+            if key(K.Q) or key(K.LeftControl) or key(K.LeftShift) then dir = dir - Vector3.yAxis end
+            MISC.flyBG.CFrame = cf
+            MISC.flyBV.Velocity = dir.Magnitude > 0 and dir.Unit * MISC.flySpeed or Vector3.new(0, 0.1, 0)
+        end)
+    elseif MISC.flyConn then
+        MISC.flyConn:Disconnect()
+        MISC.flyConn = nil
+        cleanup()
+        local char = lp.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        if hum then hum.PlatformStand = false end
+        if root then root.AssemblyLinearVelocity = Vector3.zero end
+    end
+end
+local NOFOG = {FogEnd = 786543, FogStart = 786000}
+function MISC.noFog(on)
+    local lighting = game:GetService("Lighting")
+    if on then
+        if MISC.nfOn then return end
+        MISC.nfOn = true
+        for prop, val in pairs(NOFOG) do
+            MISC.nfSaved[prop] = lighting[prop]
+            lighting[prop] = val
+            table.insert(MISC.nfConns, lighting:GetPropertyChangedSignal(prop):Connect(function()
+                if lighting[prop] ~= val then
+                    MISC.nfSaved[prop] = lighting[prop]
+                    lighting[prop] = val
+                end
+            end))
+        end
+        local function clear(a)
+            if not a:IsA("Atmosphere") then return end
+            if not MISC.nfAtmo[a] then MISC.nfAtmo[a] = {Density = a.Density, Haze = a.Haze} end
+            a.Density = 0
+            a.Haze = 0
+            for _, prop in ipairs({"Density", "Haze"}) do
+                table.insert(MISC.nfConns, a:GetPropertyChangedSignal(prop):Connect(function()
+                    if a[prop] ~= 0 then
+                        MISC.nfAtmo[a][prop] = a[prop]
+                        a[prop] = 0
+                    end
+                end))
+            end
+        end
+        for _, c in ipairs(lighting:GetChildren()) do clear(c) end
+        table.insert(MISC.nfConns, lighting.ChildAdded:Connect(clear))
+    else
+        if not MISC.nfOn then return end
+        MISC.nfOn = false
+        for _, c in ipairs(MISC.nfConns) do c:Disconnect() end
+        MISC.nfConns = {}
+        for prop, val in pairs(MISC.nfSaved) do lighting[prop] = val end
+        MISC.nfSaved = {}
+        for a, vals in pairs(MISC.nfAtmo) do
+            if a.Parent then
+                a.Density = vals.Density
+                a.Haze = vals.Haze
+            end
+        end
+        MISC.nfAtmo = {}
+    end
+end
+local miscTab = Win:AddTab("Misc", {Icon = "wrench"})
+local miscSec = miscTab:AddSection(nil)
+miscSec:AddToggle({
+    Name = "Anti AFK", Flag = "antiAfk", Tooltip = "Stops the game from kicking you for being idle",
+    Callback = function(v) MISC.antiAfk(v) end,
+})
+miscSec:AddToggle({
+    Name = "Noclip", Flag = "noclip", Tooltip = "Walk through walls and other solid objects",
+    Callback = function(v) MISC.noclip(v) end,
+})
+local speedSlider
+miscSec:AddToggle({
+    Name = "Speed", Flag = "speedHack", Tooltip = "Overrides your walk speed with the value of the slider below",
+    Callback = function(v)
+        if speedSlider then speedSlider:SetVisible(v) end
+        MISC.speed(v)
+    end,
+})
+speedSlider = miscSec:AddSlider({
+    Name = "Walk Speed", Flag = "walkSpeed", Min = 16, Max = 200, Step = 1, Default = 32,
+    Callback = function(v) MISC.walkSpeed = v end,
+})
+speedSlider:SetVisible(false)
+local flySlider
+miscSec:AddToggle({
+    Name = "Fly", Flag = "fly", Tooltip = "Flies like Infinite Yield: you move along the camera. W/A/S/D or the thumbstick to move, E or Space up, Q or Ctrl down. Combine with Noclip to pass through walls",
+    Callback = function(v)
+        if flySlider then flySlider:SetVisible(v) end
+        MISC.fly(v)
+    end,
+})
+flySlider = miscSec:AddSlider({
+    Name = "Fly Speed", Flag = "flySpeed", Min = 10, Max = 300, Step = 5, Default = 60,
+    Callback = function(v) MISC.flySpeed = v end,
+})
+flySlider:SetVisible(false)
+local fpsSlider
+miscSec:AddToggle({
+    Name = "Unlock FPS", Flag = "unlockFps", Tooltip = "Raises the FPS cap to the value of the slider below (needs setfpscap)",
+    Callback = function(v)
+        MISC.fpsOn = v
+        if fpsSlider then fpsSlider:SetVisible(v) end
+        MISC.applyFps()
+    end,
+})
+fpsSlider = miscSec:AddSlider({
+    Name = "FPS Limit", Flag = "fpsCap", Min = 30, Max = 360, Step = 5, Default = 60,
+    Callback = function(v)
+        MISC.fpsCap = v
+        MISC.applyFps()
+    end,
+})
+fpsSlider:SetVisible(false)
+miscSec:AddToggle({
+    Name = "Full Bright", Flag = "fullBright", Tooltip = "Removes darkness and fog so everything is lit",
+    Callback = function(v) MISC.fullBright(v) end,
+})
+miscSec:AddToggle({
+    Name = "No Fog", Flag = "noFog", Tooltip = "Removes fog and atmosphere haze so you can see far. Does not change brightness",
+    Callback = function(v) MISC.noFog(v) end,
+})
+miscSec:AddToggle({
+    Name = "Hide Name", Flag = "hideName", Tooltip = "Hides your name in character tags, tower info and the player list (local view)",
+    Callback = function(v) PRIV.setName(v) end,
+})
+miscSec:AddToggle({
+    Name = "Hide User", Flag = "hideUser", Tooltip = "Red body, no clothes or accessories (local view)",
+    Callback = function(v) PRIV.setUser(v) end,
+})
+miscSec:AddToggle({
+    Name = "FPS Boost", Flag = "fpsBoost", Tooltip = "Turns off particles, shadows and post effects, flattens materials",
+    Callback = function(v) PRIV.setFps(v) end,
+})
+miscSec:AddToggle({
+    Name = "Black Screen", Flag = "blackScreen", Tooltip = "Turns off 3D rendering and covers the screen with black to cut GPU load and lag. The menu stays usable",
+    Callback = function(v) MISC.blackScreen(v) end,
+})
+Win:AddSettingsTab("Settings")
+UI.OnAutoExecute = function(v)
+    cfg.autoExecute = v
+    AE.set(v)
+    if v then
+        local ok, why = AE.queue()
+        if not ok then
+            cfg.autoExecute = false
+            AE.set(false)
+            UI.SetAutoExecuteToggle(false)
+            flash("Auto Execute: " .. why, "Error")
+        end
+    end
+end
+Win:SetLoadOrder({"macro", "playMacro"})
+local function initMatch()
+    while alive() and not (MD.folder() and workspace:FindFirstChild("Troops")) do task.wait(1) end
+    if not alive() then return end
+    FW.load()
+    local net
+    local t0 = os.clock()
+    while alive() and not net and os.clock() - t0 < 60 do
+        net = FW.net()
+        if not net then task.wait(0.5) end
+    end
+    mc.ok = net ~= nil and type(net.Fire) == "function"
+    mc.hook = mc.ok
+    if not mc.ok then flash("Macro disabled: game network not found", "Error") end
+    mc.initDone = true
+    if not mc.ok and mc.play then
+        mc.play = false
+        syncToggles()
+    end
+    if not TR.connect() then warn("[ld] workspace.Troops not found") end
+    local waveObj = MD.obj("CurrentWave")
+    if waveObj then
+        local n = MD.wave()
+        if n > 0 then
+            mc.wave = n
+            st.waveStart, st.matchStart = os.clock(), os.clock()
+        end
+        waveObj.Changed:Connect(function(v)
+            if alive() then pcall(MT.waveChanged, v) end
+        end)
+    end
+    if net then
+        pcall(function()
+            net.Fired("ShowMatchFinishStat"):Connect(function(map, _, coins, candy, _, _, won, mode)
+                if alive() then
+                    pcall(MT.ended, {map = map, coins = tonumber(coins), candy = tonumber(candy), won = won == true, mode = mode})
+                end
+            end)
+        end)
+    end
+    task.spawn(function()
+        while alive() do
+            task.wait(0.1)
+            local ok1, e1 = pcall(playbackTick)
+            if not ok1 then warn("[ld] playback: " .. tostring(e1)) end
+            pcall(MT.voteStep)
+            if not mc.finalSeen and MT.finishOpen() then pcall(MT.ended, nil) end
+            if mc.finalSeen then
+                st.finalShown = true
+                if cfg.endAction ~= "None" then
+                    local ok, err = pcall(END.step, cfg.endAction)
+                    if not ok then warn("[ld] endAction: " .. tostring(err)) end
+                end
+            elseif END.active then
+                END.reset()
+            end
+        end
+    end)
+    task.spawn(function()
+        while alive() do
+            task.wait(2)
+            pcall(MT.checkFarmSell)
+        end
+    end)
+    task.spawn(function()
+        while alive() do
+            task.wait(0.05)
+            if cfg.autoSkip then pcall(MT.trySkip) end
+        end
+    end)
+    local canSkip = MD.obj("CanSkip")
+    if canSkip then
+        canSkip.Changed:Connect(function()
+            if alive() and cfg.autoSkip then pcall(MT.trySkip) end
+        end)
+    end
+end
+local function init()
+    pcall(function()
+        lp.OnTeleport:Connect(function(state)
+            if not alive() then return end
+            if state == Enum.TeleportState.Started or state == Enum.TeleportState.InProgress then
+                END.tp, END.tpAt = true, os.clock()
+                if AE.get() then pcall(AE.queue) end
+            elseif state == Enum.TeleportState.Failed then
+                END.tp = false
+            end
+        end)
+        TeleportService.TeleportInitFailed:Connect(function(plr)
+            if plr == lp then END.tp = false end
+        end)
+    end)
+    FW.load()
+    task.spawn(function()
+        local n = 0
+        while alive() do
+            task.wait(1)
+            n = n + 1
+            local line
+            if mc.running then
+                line = string.format("PLAYING %d/%d", mc.stepNo, #mc.steps)
+            elseif mc.play then
+                line = IN_MATCH and "ARMED" or "ARMED (waits for a match)"
+            elseif mc.rec then
+                line = "RECORDING"
+            end
+            if IN_MATCH then
+                macroStatus:SetText(string.format("steps <b>%d</b> | wave <b>%d</b> | $<b>%d</b>%s",
+                    #mc.steps, mc.wave, math.floor(money()), line and ("\n" .. line) or ""))
+            else
+                macroStatus:SetText(string.format("steps <b>%d</b> | in lobby%s",
+                    #mc.steps, line and ("\n" .. line) or ""))
+            end
+        end
+    end)
+    if IN_MATCH then
+        initMatch()
+    else
+        LB.init()
+    end
+end
+task.spawn(function()
+    local ok, err = pcall(init)
+    if not ok then warn("[ld] " .. tostring(err)) end
+end)
+local lastMacro = MAC.getAuto()
+if lastMacro and MAC.exists(lastMacro) then loadMacro(lastMacro, true) end
+Win:RestoreState()
+local restartedByQueue = genv.ld_ae
+genv.ld_ae = nil
+if AE.get() then
+    cfg.autoExecute = true
+    UI.SetAutoExecuteToggle(true)
+    local ok, why = AE.queue()
+    local lastLog = AE.takeLog()
+    if restartedByQueue then
+        if ok then flash("Auto Execute: script restarted after teleport", "Success")
+        else flash("Auto Execute: " .. why, "Error") end
+    end
+    if lastLog then flash("Auto Execute log: " .. lastLog, lastLog:find("error") and "Error" or "Success") end
+else
+    cfg.autoExecute = false
+    UI.SetAutoExecuteToggle(false)
+end
+UI:Notify({
+    Title = "Diamond Hub", Content = "Ready. RightShift hides the menu.", Duration = 4, Type = "Success",
+})
+UI.__booting = true
+task.delay(8, function() UI.__booting = false end)
+end, function(e)
+    local tb = debug and debug.traceback
+    return tb and tb(tostring(e), 2) or tostring(e)
+end)
+if not __ok then warn("[DiamondHub] startup error: " .. tostring(__err)) end
