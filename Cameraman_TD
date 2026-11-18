@@ -1278,6 +1278,7 @@ local function resetRecorder()
     mc.steps = {}
     clearStamps()
     mc.id2key, mc.selfSell, mc.keyN = {}, {}, 0
+    mc.reloc = nil
     mc.hookMiss = not mc.hook
 end
 local POS_EPS = 0.35
@@ -1427,6 +1428,7 @@ local function newMatch()
     mc.id2pos, mc.id2mode, mc.upAck, mc.id2name, mc.id2lvl = {}, {}, {}, {}, {}
     clearStamps()
     mc.id2key, mc.id2raw, mc.k2id, mc.selfSell = {}, {}, {}, {}
+    mc.reloc = nil
     mc.claim = {}
     mc.id2at, mc.book, mc.limits, mc.mlog = {}, {}, {}, {}
     mc.upFail, mc.waitPlace, mc.placeFail = false, nil, nil
@@ -1703,6 +1705,14 @@ local function onTowerAdd(t)
         mc.waitPlaceOk = true
         mc.waitPlaceId = id
     end
+    local rl = mc.reloc
+    if mc.rec and not mc.playing and rl and rl.id ~= id and os.clock() - rl.at < 15 and t.Name == rl.name
+        and (pos - rl.tp).Magnitude < 4 then
+        mc.id2key[id] = rl.key
+        mc.id2key[rl.id] = nil
+        mc.reloc = nil
+        return
+    end
     if mc.rec and not mc.playing then
         local e = takeStamp("TowerAdd", function(o)
             if typeof(o.pos) ~= "Vector3" then return false end
@@ -1724,7 +1734,9 @@ local function onTowerRemove(t)
     if not id then return end
     st.farms[id] = nil
     local pos, key = mc.id2pos[id], mc.id2key[id]
-    if pos and key and mc.rec and not mc.playing and not mc.selfSell[id] then
+    local rl = mc.reloc
+    local relocating = rl and rl.id == id and os.clock() - rl.at < 15
+    if pos and key and mc.rec and not mc.playing and not mc.selfSell[id] and not relocating then
         local e = takeStamp("TowerSell", function(o) return o.id == id and os.clock() - o.ts < 5, 0 end)
         if e or mc.hookMiss then
             recordStep("sell", key, pos, e, {n = mc.id2name[id]})
@@ -1751,7 +1763,7 @@ local function sellFarms(myMatch, wave)
                 if st.farms[id] then
                     mc.selfSell[id] = true
                     pcall(function() R.TowerSell:FireServer({Id = mc.id2raw[id] or id}) end)
-                    task.wait(math.max(0.05, tonumber(cfg.sellFarmDelay) or 0.1))
+                    task.wait(math.max(0.2, tonumber(cfg.sellFarmDelay) or 0.2))
                 end
             end
             task.wait(0.4)
@@ -1793,12 +1805,14 @@ local function onTowerUpgrade(t)
     if not alive() or type(t) ~= "table" then return end
     local id = tid(t)
     if not id then return end
+    local new = tonumber(t.Level)
+    -- buff / head refreshes come through this remote too, without a new level (or flagged StatsOnly): not an upgrade
+    if t.StatsOnly == true or not new then return end
     mc.upAck[id] = os.clock()
     local pos = mc.id2pos[id]
     if not pos then return end
     mc.ackSeen = true
     local old = mc.id2lvl[id] or 1
-    local new = tonumber(t.Level) or (old + 1)
     mc.id2lvl[id] = new
     local key = mc.id2key[id]
     if mc.rec and not mc.playing and key and new > old then
@@ -1892,6 +1906,10 @@ local function onFire(self, kind, arg)
                 if a and typeof(a.TargetPosition) == "Vector3" then extra.tp = v2a(a.TargetPosition) end
                 if a and typeof(a.TargetCFrame) == "CFrame" then extra.tc = {a.TargetCFrame:GetComponents()} end
                 recordStep("ability", key, pos, nil, extra, nil)
+                local def = TD.towers and TD.towers[mc.id2name[id]]
+                if a and typeof(a.TargetPosition) == "Vector3" and type(def) == "table" and def.Relocate == true then
+                    mc.reloc = {id = id, key = key, name = mc.id2name[id], tp = a.TargetPosition, at = os.clock()}
+                end
             end
         end
         return
@@ -1958,12 +1976,39 @@ local function waitUntil(cond, timeout, myMatch, step)
     end
     return false
 end
+local function equippedList()
+    local list = {}
+    local d = INV.get()
+    if type(d) ~= "table" then return list, false end
+    local ok, map = pcall(function() return require(RS.ModuleLoader.Shared.MatchLoadout).Get(lp, d) end)
+    if not ok or type(map) ~= "table" then map = d.Towers end
+    if type(map) ~= "table" then return list, false end
+    for id, t in pairs(map) do
+        if type(id) == "string" and type(t) == "table" and type(t.Name) == "string" then
+            local slot = tonumber(t.Equipped) or 0
+            if slot >= 1 then list[#list + 1] = {id = id, name = t.Name, slot = slot} end
+        end
+    end
+    table.sort(list, function(a, b) return a.slot < b.slot end)
+    return list, true
+end
 local function resolveUnit(name, saved)
     for i = 1, 5 do
         if lp:GetAttribute("Slot" .. i) == name then
             local id = lp:GetAttribute("Slot" .. i .. "Id")
             if id then return id end
         end
+    end
+    local list, known = equippedList()
+    if known then
+        local first
+        for _, u in ipairs(list) do
+            if u.name == name then
+                if u.id == saved then return saved end
+                first = first or u.id
+            end
+        end
+        if first then return first end
     end
     return saved
 end
@@ -2048,7 +2093,13 @@ local function equipped(name)
         if v ~= nil then any = true end
         if v == name then return true end
     end
-    return not any
+    if any then return false end
+    local list, known = equippedList()
+    if not known then return true end
+    for _, u in ipairs(list) do
+        if u.name == name then return true end
+    end
+    return false
 end
 local function keepPrice(s, c, m0)
     if c <= 0 then return end
@@ -2079,6 +2130,29 @@ local function slotsFull()
         return a ~= nil and b ~= nil and b > 0 and a >= b
     end
     return false
+end
+local function hydrateTowers()
+    local ok, data = pcall(function() return shared.Modules.GameReplicator.Data.Towers end)
+    if not ok or type(data) ~= "table" then return 0 end
+    local n = 0
+    for k, t in pairs(data) do
+        if type(t) == "table" and t.OwnerUserId == lp.UserId and typeof(t.Pos) == "Vector3" then
+            local id, raw = tid(t)
+            if not id and k ~= nil then id, raw = tostring(k), k end
+            if id and not mc.id2pos[id] then
+                if towerModelAlive(id) then
+                    mc.id2pos[id], mc.id2mode[id], mc.id2name[id] = t.Pos, t.TargetMode, t.Name
+                    mc.id2lvl[id], mc.id2raw[id], mc.id2at[id] = tonumber(t.Level) or 1, raw, os.clock()
+                    n = n + 1
+                end
+            elseif id and mc.id2pos[id] then
+                local lv = tonumber(t.Level)
+                if lv and lv > (mc.id2lvl[id] or 1) then mc.id2lvl[id] = lv end
+                if t.TargetMode then mc.id2mode[id] = t.TargetMode end
+            end
+        end
+    end
+    return n
 end
 local MX = {}
 function MX.cash()
@@ -2141,7 +2215,14 @@ function MX.place(s, myMatch)
             local okc, v = pcall(function() return CFrame.new(table.unpack(s.cf)) end)
             if okc and typeof(v) == "CFrame" then cf = v end
         end
-        R.TowerAdd:FireServer({Pos = p, CFrame = cf, Name = s.n, UnitId = unitId})
+        if type(unitId) ~= "string" or unitId == "" then
+            mc.waitPlace, mc.waitName = nil, nil
+            flash(tostring(s.n) .. ": no unit id (equip it first), step skipped", "Warning")
+            return false
+        end
+        -- the server drops a placement whose Pos is more than 0.05 away from the CFrame position
+        local sendPos = (cf.Position - p).Magnitude > 0.05 and cf.Position or p
+        R.TowerAdd:FireServer({Pos = sendPos, CFrame = cf, Name = s.n, UnitId = unitId})
         mc.nextPlaceAt = os.clock() + 0.5
         mc.nextUpAt = os.clock() + 0.35
         MX.reserve(before, base)
@@ -2165,6 +2246,13 @@ function MX.place(s, myMatch)
         end
         if not same(myMatch) then return false end
         mc.spend = nil
+        if hydrateTowers() > 0 then
+            local seen = idAt(p, s.n, mc.claim)
+            if seen then
+                mc.claim[seen] = true
+                return true, seen
+            end
+        end
         if fail == "limit" then
             flash(tostring(s.n) .. " rejected by the server (placement limit), step skipped", "Warning")
             return false
@@ -2231,12 +2319,17 @@ function MX.upgrade(s, myMatch)
             misses, moneyFails = 0, 0
         else
             mc.spend = nil
+            hydrateTowers()
+            if (mc.id2lvl[id] or 1) > level then
+                misses, moneyFails = 0, 0
+            else
             misses = misses + 1
             if misses >= 3 then
                 flash("Upgrade unconfirmed, step skipped", "Warning")
                 return false
             end
             if not sleep(0.5, myMatch) then return false end
+            end
         end
     end
     return false
@@ -2246,7 +2339,9 @@ local function doSell(s, myMatch)
     if not id then return false end
     for _ = 1, 4 do
         if not mc.id2pos[id] then return true end
+        if not MX.cadence(myMatch) then return false end
         R.TowerSell:FireServer({Id = mc.id2raw[id] or id})
+        mc.nextUpAt = os.clock() + 0.35
         if waitUntil(function() return mc.id2pos[id] == nil end, ackWindow(), myMatch, 0.03) then return true end
         if not same(myMatch) then return false end
     end
@@ -2274,6 +2369,9 @@ end
 local function doAbility(s, myMatch)
     local id = stepId(s)
     if not id or not R.TowerAbility then return false end
+    local name = mc.id2name[id]
+    local def = TD.towers and TD.towers[name]
+    local relocates = type(def) == "table" and def.Relocate == true
     local args
     if type(s.tp) == "table" then
         args = {TargetPosition = a2v(s.tp)}
@@ -2281,14 +2379,37 @@ local function doAbility(s, myMatch)
     end
     for _ = 1, 6 do
         if not same(myMatch) or not mc.id2pos[id] then return false end
+        if not MX.cadence(myMatch) then return false end
+        local sentAt = os.clock()
         R.TowerAbility:FireServer({Id = mc.id2raw[id] or id, Args = args})
+        mc.nextUpAt = sentAt + 0.35
         if not args then return sleep(0.4, myMatch) end
         local want = args.TargetPosition
+        local newId
         local moved = waitUntil(function()
             local cur = mc.id2pos[id]
-            return cur ~= nil and (cur - want).Magnitude < 2
-        end, ackWindow(), myMatch, 0.03)
-        if moved then return true end
+            if cur ~= nil then return (cur - want).Magnitude < 2 end
+            -- the unit can come back under a new id at the target
+            local bestD
+            for oid, p in pairs(mc.id2pos) do
+                local d = (p - want).Magnitude
+                if oid ~= id and mc.id2name[oid] == name and not (mc.claim and mc.claim[oid]) and d < 2.5
+                    and (mc.id2at[oid] or 0) >= sentAt
+                    and (not bestD or d < bestD) then
+                    newId, bestD = oid, d
+                end
+            end
+            return newId ~= nil
+        end, relocates and math.max(ackWindow(), 12) or ackWindow(), myMatch, 0.03)
+        if moved then
+            if newId and s.k then
+                mc.k2id[s.k] = newId
+                mc.claim = mc.claim or {}
+                mc.claim[newId] = true
+            end
+            return true
+        end
+        if not mc.id2pos[id] then return false end
         if not sleep(1, myMatch) then return false end
     end
     return false
@@ -2345,6 +2466,7 @@ local function runPlayback(myMatch)
     mc.k2id = {}
     mc.spend, mc.nextPlaceAt, mc.nextUpAt, mc.upFailAt = nil, nil, nil, nil
     local sel, steps = mc.selected, mc.steps
+    hydrateTowers()
     mc.playT0 = os.clock()
     mc.playRt0 = nil
     for _, s0 in ipairs(steps) do
@@ -3034,7 +3156,7 @@ recToggle = recGrid:AddToggle({
 })
 playToggle = recGrid:AddToggle({
     Name = "Play Macro", Flag = "playMacro",
-    Tooltip = "Replays the selected macro in every match. Units are bought and upgraded the moment there is enough money, without waiting for a wave; only sells keep their wave and time. Saved in configs: autofarm starts by itself",
+    Tooltip = "Replays the selected macro in every match, the way the Replay Mode below says. Saved in configs: autofarm starts by itself",
     Callback = function(v)
         if v then
             if mc.initDone and not mc.ok then
