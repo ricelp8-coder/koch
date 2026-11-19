@@ -2927,7 +2927,7 @@ optSec:AddDropdown({
 })
 skipBarrierInput = optSec:AddInput({
     Name = "Skip Barriers", Flag = "skipBarriers", Placeholder = "e.g. 10, 25, 40",
-    Tooltip = "Waves that Auto Skip will not touch, separated by commas. Each barrier wave and the pause after it play out on their own, skipping resumes on the next wave. Empty = no barriers",
+    Tooltip = "Waves that Auto Skip will not touch, separated by commas. The barrier wave itself plays out on its own; the intermission after it is still skipped, and skipping resumes on the next wave. Empty = no barriers",
     Callback = function(v)
         local set, list = parseBarriers(v)
         cfg.skipBarriers = set
@@ -3949,7 +3949,7 @@ local function init()
                         sk.nextAt = os.clock() + cfg.skipDelay
                     end
                     if not (gui and visible(gui)) then return end
-                    if isBarrier(w) then
+                    if isBarrier(w) and not inter then
                         if st.limMatch ~= mc.matchId then
                             st.limMatch = mc.matchId
                             st.limHit = {}
