@@ -4846,9 +4846,13 @@ Util.OnObject = function(Object)
 	elseif Object.ClassName == "ProximityPrompt" and not Object:GetAttribute("FakePrompt") then
 		if Object:HasTag("DisableWhenEnabledOnClient") then Object:RemoveTag("DisableWhenEnabledOnClient") end
 
-		Object:SetAttribute("HoldDuration_Old", Object.HoldDuration)
-		Object:SetAttribute("RequiresLineOfSight_Old", Object.RequiresLineOfSight)
-		Object:SetAttribute("MaxActivationDistance_Old", Object.MaxActivationDistance)
+		-- keep the first-seen values: a prompt can be handled again after being re-parented,
+		-- and re-reading it would store our own boosted values as the "originals"
+		if Object:GetAttribute("MaxActivationDistance_Old") == nil then
+			Object:SetAttribute("HoldDuration_Old", Object.HoldDuration)
+			Object:SetAttribute("RequiresLineOfSight_Old", Object.RequiresLineOfSight)
+			Object:SetAttribute("MaxActivationDistance_Old", Object.MaxActivationDistance)
+		end
 
 		if Toggles.InstantPrompts.Value    then Object.HoldDuration = 0 end
 		if Toggles.PromptClip.Value        then Object.RequiresLineOfSight = false end
@@ -5083,7 +5087,7 @@ if not Util.Press then
 	end
 	Util.PressHard = Util.Press
 
-	task.spawn(function()
+	local function FallbackLoop()
 		while task.wait() do
 			local Prompt = table.remove(PromptsToFire, 1)
 			if not Prompt then continue end
@@ -5143,6 +5147,15 @@ if not Util.Press then
 			ShownConn:Disconnect()
 			FiredConn:Disconnect()
 		end
+	end
+	task.spawn(function()
+		while true do
+			local Alive = pcall(FallbackLoop)
+			if Alive then break end
+			table.clear(PromptCooldown)
+			table.clear(PromptsToFire)
+			task.wait(0.1)
+		end
 	end)
 end
 
@@ -5153,6 +5166,28 @@ local AutoInteractBlacklist = {
 }
 
 local TriggerDebounce = false
+local PressLog = setmetatable({}, { __mode = "k" })
+local RepeatFriendly = { LongPushPrompt = true, BigPropPrompt = true, PushPrompt = true }
+-- returns false when this prompt was just pressed or keeps being pressed without ever finishing
+local function PressAllowed(Prompt)
+	local Now = tick()
+	local Rec = PressLog[Prompt]
+	if not Rec then
+		Rec = { n = 0, t0 = Now, last = 0, mute = 0 }
+		PressLog[Prompt] = Rec
+	end
+	if Now < Rec.mute then return false end
+	if Now - Rec.last < 0.3 then return false end
+	if Now - Rec.t0 > 6 then Rec.n = 0 Rec.t0 = Now end
+	Rec.n += 1
+	Rec.last = Now
+	if Rec.n > 8 and not RepeatFriendly[Prompt.Name] then
+		Rec.mute = Now + 10
+		Rec.n = 0
+		return false
+	end
+	return true
+end
 
 local function GetHidingSpotModel(Prompt)
 	if not Prompt or not Prompt.Parent then return false end
@@ -5293,8 +5328,10 @@ Util.Activate = function(Prompt)
 	if Prompt.Parent.Name == "StairwellTerminal" then return end
 	if Prompt.Parent.Parent.Name == "MeldChord" then return end
 
-	Util.Press(Prompt)
+	if not PressAllowed(Prompt) then return end
 	TriggerDebounce = true
+	local Fired, Why = pcall(Util.Press, Prompt)
+	if not Fired then warn("[DiamondHub] interact failed: " .. tostring(Why)) end
 	if Floor == "OldHotel" then task.wait() end
 	TriggerDebounce = false
 end
@@ -5305,7 +5342,12 @@ Links.AutoInteract = Services.RunService.Heartbeat:Connect(function()
     if not Active then return end
     if tick() - Ctx.UseFireAt < 1/60 then return end
 
-	for _, Prompt in Objects.Prompts do
+	for Idx = #Objects.Prompts, 1, -1 do
+		local Prompt = Objects.Prompts[Idx]
+		if not Prompt or not Prompt.Parent then
+			table.remove(Objects.Prompts, Idx)
+			continue
+		end
         if Prompt:GetAttribute("ParentRoom") and tonumber(Prompt:GetAttribute("ParentRoom")) ~= tonumber(LocalPlayer:GetAttribute("CurrentRoom")) then continue end
 
 		if Prompt.Parent and (Prompt.Parent:IsA("BasePart") or Prompt.Parent:IsA("Model")) then
