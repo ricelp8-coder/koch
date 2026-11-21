@@ -249,8 +249,6 @@ do
         end,
     })
     linkSec:AddLabel({Text = DISCORD_LINK})
-    local creditSec = statusTab:AddSection("Credits")
-    creditSec:AddLabel({Text = "Built on top of Abysall Hub (AbysallHubContinued by coolcookiebusiness). Source shared by the original author. Thanks to them for the groundwork.", Color = "Text"})
 end
 local Library = UI.Library
 local Toggles = Library.Toggles
