@@ -4368,16 +4368,25 @@ Util.OnCharCore = function(NewCharacter, Gen)
 		end)
 
 		Util.Guard("frame doors", function()
-			if tick() - (Ctx.DoorClearAt or 0) < 0.25 then return end
-			Ctx.DoorClearAt = tick()
+			-- a door that is opening (or opened) keeps its collision until the animation ends, which stops fast players
 			local Cur = tonumber(LatestRoom.Value) or 0
+			Ctx.DoorLast = Ctx.DoorLast or setmetatable({}, { __mode = "k" })
+			Ctx.DoorFree = Ctx.DoorFree or setmetatable({}, { __mode = "k" })
 			for N = Cur - 1, Cur + 1 do
 				local Room = CurrentRooms:FindFirstChild(tostring(N))
 				local Door = Room and Room:FindFirstChild("Door")
-				-- an opened door keeps blocking until its animation ends, which stops fast players
-				if Door and Door:GetAttribute("Opened") == true then
-					for _, Part in Door:GetDescendants() do
-						if Part:IsA("BasePart") and Part.CanCollide then Part.CanCollide = false end
+				if Door then
+					local Leaf = Door:FindFirstChild("Door")
+					if not (Leaf and Leaf:IsA("BasePart")) then Leaf = Door:FindFirstChildWhichIsA("BasePart", true) end
+					if Leaf then
+						local Last = Ctx.DoorLast[Door]
+						if Last and Leaf.CFrame ~= Last then Ctx.DoorFree[Door] = true end
+						Ctx.DoorLast[Door] = Leaf.CFrame
+					end
+					if Ctx.DoorFree[Door] or Door:GetAttribute("Opened") == true then
+						for _, Part in Door:GetDescendants() do
+							if Part:IsA("BasePart") and Part.CanCollide then Part.CanCollide = false end
+						end
 					end
 				end
 			end
@@ -5445,7 +5454,7 @@ Util.Activate = function(Prompt)
 	then return end
 
 	if Prompt:IsDescendantOf(Drops) and Options.AutoInteractIgnoreList.Value["Dropped Items"] then return end
-	if Prompt.Parent.Name == "TrackLever" then return end -- handled by the dedicated lever loop below
+	if Prompt.Parent.Name == "TrackLever" then return end
 	if Prompt.Name == "ActivateEventPrompt" and (Prompt.ActionText == "Close"
 		or Prompt.Parent.Name == "ElevatorBreaker"
 		or (Prompt.Parent.Parent and Prompt.Parent.Parent.Name == "IndustrialGate"))
@@ -5527,83 +5536,6 @@ Util.Activate = function(Prompt)
 end
 
 Ctx.UseFireAt = tick()
--- Track levers always start on the wrong (left) side, every pull flips them. Odd pull count = right side = correct.
--- The pull count comes from the prompt's Interactions attribute when the game keeps it, otherwise from our own pulls.
-Ctx.Levers = setmetatable({}, { __mode = "k" })
-local LeverMaxPulls, LeverGap = 6, 1.5
-Util.LeverRec = function(Prompt)
-	local Rec = Ctx.Levers[Prompt]
-	if not Rec then
-		local First = Prompt:GetAttribute("Interactions")
-		Rec = { Own = 0, Total = 0, At = 0, Before = nil, Blind = false, Base = type(First) == "number" and First or 0 }
-		warn("[DiamondHub] track lever found, Interactions=" .. tostring(First) .. ", enabled=" .. tostring(Prompt.Enabled))
-		Ctx.Levers[Prompt] = Rec
-	end
-	return Rec
-end
-Util.LeverNeedsPull = function(Prompt)
-	if not Prompt.Enabled then return false end
-	local Rec = Util.LeverRec(Prompt)
-	if Rec.Total >= LeverMaxPulls or tick() - Rec.At < LeverGap then return false end
-	local Attr = Prompt:GetAttribute("Interactions")
-	if Rec.Before ~= nil and not Rec.Blind and Attr == Rec.Before then
-		Rec.Blind = true -- the attribute never moved after our pull, stop trusting it
-	end
-	-- only the change since we first saw the lever counts, whatever value the game starts it on
-	local Count = (type(Attr) == "number" and not Rec.Blind) and (Attr - Rec.Base) or Rec.Own
-	return Count % 2 == 0
-end
-Util.LeverPulled = function(Prompt)
-	local Rec = Util.LeverRec(Prompt)
-	Rec.Own += 1
-	Rec.Total += 1
-	Rec.At = tick()
-	Rec.Before = Prompt:GetAttribute("Interactions")
-end
--- Dedicated loop for track levers: no room/prompt-list/cooldown filters of the generic loop in the way.
-Ctx.LeverList, Ctx.LeverScanAt = {}, 0
-task.spawn(function()
-	while task.wait(0.2) do
-		Util.Guard("track lever", function()
-			if not (Toggles.AutoInteractSwitch.Value or Options.AutoInteractBind:GetState()) then return end
-			if not Character or not Character.Parent or not RootPart then return end
-			if tick() - Ctx.LeverScanAt > 1 then
-				Ctx.LeverScanAt = tick()
-				local List = {}
-				local Cur = tonumber(LatestRoom.Value) or 0
-				for N = Cur - 1, Cur + 1 do
-					local Room = CurrentRooms:FindFirstChild(tostring(N))
-					local Lever = Room and Room:FindFirstChild("TrackLever", true)
-					local Prompt = Lever and Lever:FindFirstChildWhichIsA("ProximityPrompt", true)
-					if Prompt then table.insert(List, { Lever = Lever, Prompt = Prompt }) end
-				end
-				Ctx.LeverList = List
-			end
-			for _, Item in Ctx.LeverList do
-				local Lever, Prompt = Item.Lever, Item.Prompt
-				if Lever.Parent and Prompt.Parent then
-					local Dist = LocalPlayer:DistanceFromCharacter(Lever:GetPivot().Position)
-					if Dist > 0 and Dist <= Prompt.MaxActivationDistance and Util.LeverNeedsPull(Prompt) then
-						local OldHold = Prompt.HoldDuration
-						if OldHold > 0 then Prompt.HoldDuration = 0 end
-						local Fired, Why = pcall(Util.Press, Prompt)
-						if OldHold > 0 then
-							task.delay(0.25, function()
-								if Prompt.Parent and Prompt.HoldDuration == 0 then Prompt.HoldDuration = OldHold end
-							end)
-						end
-						if Fired then
-							Util.LeverPulled(Prompt)
-						else
-							warn("[DiamondHub] lever press failed: " .. tostring(Why))
-						end
-					end
-				end
-			end
-		end)
-	end
-end)
-
 Links.AutoInteract = Services.RunService.Heartbeat:Connect(function()
 	local Active = Toggles.AutoInteractSwitch.Value or Options.AutoInteractBind:GetState()
     if not Active then return end
