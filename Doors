@@ -1404,7 +1404,7 @@ for _, FloorTab in ipairs({
 end
 
 
-Boxes.Move = Tabs.Home:AddRightGroupbox("Movement")
+Boxes.Move = Tabs.Home:AddLeftGroupbox("Movement")
 Boxes.Move:AddSlider("SpeedBoostSlider", {
 	Text = "Extra Speed", Min = 0, Max = 100, Default = 0, Rounding = 0, Compact = true
 })
@@ -1496,13 +1496,13 @@ do
 	end)
 end
 
-Boxes.Reach = Tabs.Home:AddRightGroupbox("Interaction")
+Boxes.Reach = Tabs.Home:AddLeftGroupbox("Self")
 Boxes.Reach:AddToggle("DoorReachSwitch", {
-	Text = "Door Range", Default = false, Tooltip = "Raises the range from which you can open a door."
+	Text = "Door Reach", Default = false, Tooltip = "Raises the range from which you can open a door."
 })
 Boxes.Reach:AddDivider()
 Boxes.Reach:AddSlider("PromptReachSlider", {
-	Text = "Prompt Range Scale", Min = 1, Max = 2, Default = 1, Rounding = 1, Compact = true
+	Text = "Prompt Reach Multiplier", Min = 1, Max = 2, Default = 1, Rounding = 1, Compact = true
 })
 Boxes.Reach:AddToggle("AutoInteractSwitch", {
 	Text = "Auto Interact", Default = false, Tooltip = "Triggers every prompt within range automatically. Use the ignore list to skip some."
@@ -1514,16 +1514,16 @@ Toggles.AutoInteractSwitch:AddKeyPicker("AutoInteractBind", {
     SyncToggleState = true
 })
 Boxes.Reach:AddDropdown("AutoInteractIgnoreList", {
-	Text = "Skip List",
+	Text = "Ignore List",
 	Values = { "Glitch Fragments", "Jeff Items", "Dropped Items", "Currency", "Minecarts", "Locks" },
 	Default = { "Glitch Fragments", "Jeff Items", "Dropped Items" },
 	Multi = true, AllowNull = true
 })
 Boxes.Reach:AddToggle("InstantPrompts", {
-	Text = "No Hold Time", Default = false, Tooltip = "Strips the hold time, so prompts fire the moment you press them."
+	Text = "Instant Prompts", Default = false, Tooltip = "Strips the hold time, so prompts fire the moment you press them."
 })
 Boxes.Reach:AddToggle("PromptClip", {
-	Text = "Prompts Through Walls", Default = false, Tooltip = "Lets prompts work even when a wall is in the way."
+	Text = "Prompt Clip", Default = false, Tooltip = "Lets prompts work even when a wall is in the way."
 })
 
 Options.PromptReachSlider:OnChanged(function(Value)
@@ -1542,7 +1542,7 @@ Toggles.PromptClip:OnChanged(function(Value)
 	end
 end)
 
-Boxes.Autos = Tabs.Home:AddLeftGroupbox("Auto Actions")
+Boxes.Autos = Tabs.Home:AddRightGroupbox("Auto Actions")
 Boxes.Autos:AddToggle("AutoBreakerBox", {
 	Text = "Breaker Solver", Default = false, Tooltip = "Completes the breaker box puzzle for you once you open it."
 })
@@ -1628,7 +1628,7 @@ Toggles.AutoClosetSwitch:AddKeyPicker("AutoClosetBind", {
 	Text = "Auto Hide", Default = "Q", Mode = "Toggle", SyncToggleState = true
 })
 
-Boxes.Extras = Tabs.Home:AddLeftGroupbox("Extras")
+Boxes.Extras = Tabs.Home:AddRightGroupbox("Extras")
 Boxes.Extras:AddButton({
 	Text = "Restart Run", Tooltip = "Starts the queue for a new run. Click it again to cancel the queue.", DoubleClick = true,
 	Func = function() RemotesFolder.PlayAgain:FireServer() end
@@ -1666,7 +1666,7 @@ Boxes.Extras:AddButton({
 
 
 
-Boxes.Tools = Tabs.Home:AddLeftGroupbox("Utilities")
+Boxes.Tools = Tabs.Home:AddRightGroupbox("Utilities")
 Boxes.Tools:AddButton({
 	Text = "Unstick Ladder",
 	Tooltip = "Wipes the stuck 'climbing' state if a ladder locked your movement.",
@@ -1803,12 +1803,12 @@ end)
 
 
 
-Boxes.ArchExtras = Tabs.Archives:AddRightGroupbox("Archive Extras")
-Boxes.ArchExtras:AddToggle("GuardRansom", { Text = "Ransom Guard", Default = false, Tooltip = "Ransom can no longer attack you." })
-Boxes.ArchExtras:AddToggle("GuardClosetTrash", { Text = "Clean Closets", Default = false, Tooltip = "Wipes the trash that spawns inside closets so you can hide normally." })
-Boxes.ArchExtras:AddToggle("ForgetMeNotSolver", { Text = "Forget Me Not Solver", Default = false, Tooltip = "Skips through the Forget Me Not doors for you." })
-Boxes.ArchExtras:AddToggle("EvadeDronesStampede", { Text = "Stampede Guard", Default = false, Tooltip = "Freezes the Archives clock so the Drones Stampede never triggers." })
-Boxes.ArchExtras:AddToggle("HonchoCorrectBoxMark", { Text = "Right Box Marker / Auto Use", Default = false, Tooltip = "Highlights the right box in the Honcho sequence and drops it in the correct deposit for you." })
+Boxes.ArchExtras = Tabs.Archives:AddRightGroupbox("Misc")
+Boxes.ArchExtras:AddToggle("GuardRansom", { Text = "Anti Ransom", Default = false, Tooltip = "Ransom can no longer attack you." })
+Boxes.ArchExtras:AddToggle("GuardClosetTrash", { Text = "Auto Clear Closets", Default = false, Tooltip = "Wipes the trash that spawns inside closets so you can hide normally." })
+Boxes.ArchExtras:AddToggle("ForgetMeNotSolver", { Text = "Auto Skip Forget Me Not", Default = false, Tooltip = "Skips through the Forget Me Not doors for you." })
+Boxes.ArchExtras:AddToggle("EvadeDronesStampede", { Text = "Anti Stampede", Default = false, Tooltip = "Freezes the Archives clock so the Drones Stampede never triggers." })
+Boxes.ArchExtras:AddToggle("HonchoCorrectBoxMark", { Text = "Correct Box ESP/Auto Interact", Default = false, Tooltip = "Highlights the right box in the Honcho sequence and drops it in the correct deposit for you." })
 
 
 
@@ -2038,11 +2038,11 @@ Toggles.HonchoCorrectBoxMark:OnChanged(function(Value)
 end)
 
 
-Boxes.ArchSkips = Tabs.Archives:AddLeftGroupbox("Hazard Skips")
-Boxes.ArchSkips:AddToggle("EvadeWater", { Text = "Ignore Electric Water", Default = false, Tooltip = "You can walk through the electric water safely." })
-Boxes.ArchSkips:AddToggle("EvadeAlma", { Text = "Ignore Alma", Default = false, Tooltip = "Prevents Alma from appearing." })
-Boxes.ArchSkips:AddToggle("EvadeDrones", { Text = "Ignore Drones", Default = false, Tooltip = "Drones can no longer attack you." })
-Boxes.ArchSkips:AddToggle("GuardScribbles", { Text = "Ignore Scribbles", Default = false, Tooltip = "Scribbles can no longer attack you." })
+Boxes.ArchSkips = Tabs.Archives:AddLeftGroupbox("Bypasses")
+Boxes.ArchSkips:AddToggle("EvadeWater", { Text = "Bypass Electric Water", Default = false, Tooltip = "You can walk through the electric water safely." })
+Boxes.ArchSkips:AddToggle("EvadeAlma", { Text = "Bypass Alma", Default = false, Tooltip = "Prevents Alma from appearing." })
+Boxes.ArchSkips:AddToggle("EvadeDrones", { Text = "Bypass Drones", Default = false, Tooltip = "Drones can no longer attack you." })
+Boxes.ArchSkips:AddToggle("GuardScribbles", { Text = "Bypass Scribbles", Default = false, Tooltip = "Scribbles can no longer attack you." })
 
 
 Toggles.GuardClosetTrash:OnChanged(function(Value)
@@ -2358,16 +2358,16 @@ Toggles.EvadeDrones:OnChanged(function(Value)
 	end
 end)
 
-Boxes.StairExtras = Tabs.Stairwell:AddLeftGroupbox("Stairwell Extras")
+Boxes.StairExtras = Tabs.Stairwell:AddLeftGroupbox("Misc")
 
 
 
-Boxes.StairExtras:AddToggle("EvadeNoise", { Text = "TV Noise Breaker", Default = false, Tooltip = "Breaks Noise's TV while you are carrying it." })
+Boxes.StairExtras:AddToggle("EvadeNoise", { Text = "Noise Tv Breaker", Default = false, Tooltip = "Breaks Noise's TV while you are carrying it." })
 
 
 
 Boxes.StairExtras:AddToggle("CreakAggressionMeter", {
-    Text = "Creak Rage Meter",
+    Text = "Creak Aggression Meter",
     Default = false,
     Tooltip = "Draws Creak's current aggression level above its head."
 })
@@ -2561,7 +2561,7 @@ Boxes.StairExtras:AddDivider()
 
 
 Boxes.StairExtras:AddToggle("BlockStairwellCrusherCollision", {
-	Text = "No Crushers",
+	Text = "Disable Crushers",
 	Default = false,
 	Tooltip = "Turns off the crusher collision so it can't hurt or push you.",
 })
@@ -2621,7 +2621,7 @@ end)
 
 
 
-Boxes.StairBeta = Tabs.Stairwell:AddRightGroupbox("Beta")
+Boxes.StairBeta = Tabs.Stairwell:AddRightGroupbox("Experimental")
 
 local function BringDroppedItems()
 	local workspaceDropsFolder = workspace:FindFirstChild("Drops")
@@ -2640,7 +2640,7 @@ local function BringDroppedItems()
 end
 
 Boxes.StairBeta:AddButton({
-	Text = "Pull Dropped Items",
+	Text = "Bring Dropped Items",
 	Func = function() BringDroppedItems() end,
 	DoubleClick = false,
 	Tooltip = "Pulls every dropped item to your position."
@@ -2651,7 +2651,7 @@ Boxes.StairBeta:AddDivider()
 
 
 Boxes.StairBeta:AddToggle("OrbitDroppedItems", {
-	Text = "Circle Dropped Items",
+	Text = "Orbit Dropped Items",
 	Default = false,
 	Tooltip = "Spins every dropped item around you. They are pulled back to you every 10s so they don't despawn."
 })
@@ -3513,7 +3513,7 @@ Options.MarkTracerThickness:OnChanged(function(V) DHub.ESPKit:SetTracerSize(V) e
 Toggles.MarkArrowsSwitch:OnChanged(function(V)    DHub.ESPKit:SetArrows(V) end)
 Options.MarkArrowsRadius:OnChanged(function(V)    DHub.ESPKit:SetArrowRadius(V) end)
 
-Boxes.MineAutos = Tabs.Mines:AddLeftGroupbox("Mine Autos")
+Boxes.MineAutos = Tabs.Mines:AddLeftGroupbox("Automation")
 local DoorValvesRunning = false
 Boxes.MineAutos:AddButton({
 	Text = "Auto Complete Door 200",
@@ -3576,26 +3576,26 @@ Boxes.MineAutos:AddButton({
 		end)
 	end
 })
-Boxes.RoomAutos = Tabs.Rooms:AddLeftGroupbox("Room Autos")
-Boxes.RoomExtras = Tabs.Rooms:AddRightGroupbox("Room Extras")
+Boxes.RoomAutos = Tabs.Rooms:AddLeftGroupbox("Automation")
+Boxes.RoomExtras = Tabs.Rooms:AddRightGroupbox("Misc")
 
 Boxes.MineAutos:AddToggle("AutoSteerMinecart", {
-	Text = "Cart Autopilot", Default = false, Tooltip = "Steers and ducks for you through the whole minecart chase.",
+	Text = "Auto Minecart", Default = false, Tooltip = "Steers and ducks for you through the whole minecart chase.",
 	Disabled = not Util.Supports({"require"}), DisabledTooltip = Ctx.NoSupportMsg
 })
 Boxes.MineAutos:AddSlider("AutoSteerMinecartTurnDistance", {
-	Text = "Steer Range", Min = 20, Max = 40, Default = 30, Rounding = 0,
+	Text = "Turn Distance", Min = 20, Max = 40, Default = 30, Rounding = 0,
 	Disabled = not Util.Supports({"require"}), DisabledTooltip = Ctx.NoSupportMsg
 })
 Boxes.MineAutos:AddSlider("AutoSteerMinecartDuckDistance", {
-	Text = "Duck Range", Min = 20, Max = 40, Default = 30, Rounding = 0,
+	Text = "Crouch Distance", Min = 20, Max = 40, Default = 30, Rounding = 0,
 	Disabled = not Util.Supports({"require"}), DisabledTooltip = Ctx.NoSupportMsg
 })
-Boxes.RoomAutos:AddToggle("RoomsRun",             { Text = "Rooms Autopilot",       Default = false, Tooltip = "Walks through The Rooms by itself and hides when an entity comes." })
-Boxes.RoomAutos:AddSlider("RoomsRunPathfindTimeout", { Text = "Path Timeout", Min = 0.5, Max = 3, Default = 1, Rounding = 1 })
-Boxes.RoomAutos:AddToggle("RoomsRunShowPathSwitch", { Text = "Draw Path",       Default = false, Tooltip = "Draws the route Auto Rooms is currently following." })
+Boxes.RoomAutos:AddToggle("RoomsRun",             { Text = "Auto Rooms",       Default = false, Tooltip = "Walks through The Rooms by itself and hides when an entity comes." })
+Boxes.RoomAutos:AddSlider("RoomsRunPathfindTimeout", { Text = "Pathfind Timeout", Min = 0.5, Max = 3, Default = 1, Rounding = 1 })
+Boxes.RoomAutos:AddToggle("RoomsRunShowPathSwitch", { Text = "Show Path",       Default = false, Tooltip = "Draws the route Auto Rooms is currently following." })
 Boxes.RoomAutos:AddToggle("RoomsRunSpoofFootsteps", {
-    Text = "Fake Footsteps", Default = false, Tooltip = "Mimics regular walking so the server sees footsteps while Auto Rooms moves you.",
+    Text = "Spoof Footsteps", Default = false, Tooltip = "Mimics regular walking so the server sees footsteps while Auto Rooms moves you.",
     Disabled = not Util.Supports({"hookmetamethod", "newcclosure", "getnamecallmethod"}), DisabledTooltip = Ctx.NoSupportMsg
 })
 Boxes.RoomExtras:AddToggle("RoomsRunIgnoreA60",    { Text = "Anti A-60",        Default = false, Tooltip = "Auto Rooms keeps walking when A-60 spawns. Turns God Mode on for you." })
@@ -6072,7 +6072,25 @@ UI.OnAutoExecute = function(v)
 		end
 	end
 end
+local SavedUi = DWin._stateIO and DWin._stateIO.read()
 DWin:RestoreState()
+-- keybinds are rebuilt by the menu library after the restore in some cases: re-apply them once things settled
+task.spawn(function()
+	local Flags = type(SavedUi) == "table" and SavedUi.flags
+	if type(Flags) ~= "table" then return end
+	for Round = 1, 3 do
+		task.wait(Round == 1 and 0.6 or 1.5)
+		for Idx, El in pairs(Library.Options) do
+			if type(Idx) == "string" and type(El) == "table" and El.Type == "KeyPicker" then
+				local Want = Flags["d_" .. Idx]
+				if type(Want) == "table" and Want[1] ~= nil and (El.Value ~= Want[1] or El.Mode ~= Want[2]) then
+					if Round == 3 then warn("[DiamondHub] keybind " .. Idx .. " is " .. tostring(El.Value) .. ", saved " .. tostring(Want[1])) end
+					pcall(function() El:SetValue({ Want[1], Want[2] }) end)
+				end
+			end
+		end
+	end
+end)
 local restartedByQueue = genv.dh_ae
 genv.dh_ae = nil
 if AE.get() then
