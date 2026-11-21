@@ -1564,6 +1564,45 @@ Toggles.AutoBreakerBox:OnChanged(function(Value)
 end)
 
 Boxes.Autos:AddToggle("AutoHeartbeatSolver", { Text = "Heartbeat Solver", Default = false, Tooltip = "Blocks the heartbeat minigame from reporting a miss, so Figure never catches you.", Disabled = not Util.Supports({"hookmetamethod", "newcclosure", "getnamecallmethod"}), DisabledTooltip = Ctx.NoSupportMsg })
+Boxes.Autos:AddToggle("AutoEggGame", {
+	Text = "Auto Egg Game", Default = false,
+	Tooltip = "In the egg minigame: catches good eggs and smashes rotten ones the moment they appear.",
+	Disabled = not Util.Supports({"require"}), DisabledTooltip = Ctx.NoSupportMsg
+})
+do
+	local Loop
+	local function GetEggCore()
+		local Module = FloorReplicated:FindFirstChild("ClientRemote")
+		Module = Module and Module:FindFirstChild("EggGame")
+		if not Module then return nil end
+		local Ok, Core = pcall(function() return require(Module)().GetCore() end)
+		return Ok and Core or nil
+	end
+	Toggles.AutoEggGame:OnChanged(function(Enabled)
+		if Loop then task.cancel(Loop) Loop = nil end
+		if not Enabled then return end
+		Loop = task.spawn(function()
+			local Warned = false
+			while Toggles.AutoEggGame.Value do
+				local Core = GetEggCore()
+				if Core and type(Core.eggs) == "table" then
+					for _, Egg in ipairs(table.clone(Core.eggs)) do
+						if Egg.Alive then
+							local Ok, Err = pcall(function()
+								if Egg.Type == "Rotten" then Core:_BreakEgg(Egg) else Core:_CatchEgg(Egg) end
+							end)
+							if not Ok and not Warned then
+								Warned = true
+								warn("[DiamondHub] egg game: " .. tostring(Err))
+							end
+						end
+					end
+				end
+				task.wait(0.1)
+			end
+		end)
+	end)
+end
 Boxes.Autos:AddDivider()
 Boxes.Autos:AddToggle("AutoUnlockPadlockSwitch", {
 	Text = "Padlock Solver", Default = false, Tooltip = "Enters the library code into the padlock when you are within the set distance."
