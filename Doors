@@ -3857,7 +3857,34 @@ Links.TextBoxConnection2 = Services.UserInputService.TextBoxFocusReleased:Connec
 	Ctx.Typing = false
 end)
 
+local GuardWarned = {}
+Util.Guard = function(Name, Fn, ...)
+	local Ok, Err = pcall(Fn, ...)
+	if not Ok then
+		local Now = tick()
+		if not GuardWarned[Name] or Now - GuardWarned[Name] > 5 then
+			GuardWarned[Name] = Now
+			warn("[DiamondHub] " .. Name .. ": " .. tostring(Err))
+		end
+	end
+	return Ok
+end
+
 Util.OnChar = function(NewCharacter)
+	Ctx.CharGen = (Ctx.CharGen or 0) + 1
+	local Gen = Ctx.CharGen
+	Ctx.CharBusy = Gen
+	for Try = 1, 8 do
+		if Gen ~= Ctx.CharGen or NewCharacter.Parent == nil then break end
+		local Ok, Err = pcall(Util.OnCharCore, NewCharacter, Gen)
+		if Ok then break end
+		warn("[DiamondHub] character setup failed (try " .. Try .. "): " .. tostring(Err))
+		task.wait(1)
+	end
+	if Ctx.CharBusy == Gen then Ctx.CharBusy = nil end
+end
+
+Util.OnCharCore = function(NewCharacter, Gen)
 	for _, Key in CharacterOldConnectionKeys do
 		if Links[Key] then
 			Links[Key]:Disconnect()
@@ -3865,20 +3892,34 @@ Util.OnChar = function(NewCharacter)
 		end
 	end
 
-	while not LocalPlayer.PlayerGui:FindFirstChild("MainUI") do
-		task.wait()
-	end
+	-- after a respawn the old MainUI can still be around for a moment, wait for the fresh one to be fully built
+	local Hud
+	repeat
+		Hud = LocalPlayer.PlayerGui:FindFirstChild("MainUI")
+		local Init = Hud and Hud:FindFirstChild("Initiator")
+		if not (Init and Init:FindFirstChild("Main_Game") and Hud:FindFirstChild("MainFrame")) then
+			Hud = nil
+			task.wait(0.1)
+		end
+		if Gen ~= Ctx.CharGen or NewCharacter.Parent == nil then return end
+	until Hud
 
 	Character = NewCharacter
-	Humanoid = NewCharacter:WaitForChild("Humanoid", 9e9)
-	RootPart = NewCharacter:FindFirstChild("HumanoidRootPart")
+	Humanoid = NewCharacter:WaitForChild("Humanoid", 15)
+	RootPart = NewCharacter:WaitForChild("HumanoidRootPart", 15)
 	Camera   = Services.Workspace.CurrentCamera
+	if not Humanoid or not RootPart then error("character parts missing") end
 
 	Ctx.CamPrev = Camera
-	Ctx.Hud = LocalPlayer.PlayerGui.MainUI
+	Ctx.Hud = Hud
 
-	Collision = NewCharacter:WaitForChild("Collision")
+	Collision = NewCharacter:WaitForChild("Collision", 15)
+	if not Collision then error("Collision missing") end
 	CollisionPart  = NewCharacter:FindFirstChild("CollisionPart") or NewCharacter:FindFirstChild("Collision")
+	for _, Old in { "CollisionClone", "CollisionPartClone" } do
+		local Stale = NewCharacter:FindFirstChild(Old)
+		if Stale then Stale:Destroy() end
+	end
 	CollisionClone = Collision:Clone()
 	CollisionClone.Parent = NewCharacter
 	CollisionClone.Name = "CollisionClone"
@@ -3894,6 +3935,7 @@ Util.OnChar = function(NewCharacter)
 		CollisionPartClone.CollisionCrouch:Destroy()
 	end
 
+	Util.Guard("spawn attrs", function()
 	Character:SetAttribute("SpeedBoost", 0)
 	Character:SetAttribute("SpeedBoostBehind", 0)
 	Character:SetAttribute("SpeedBoostExtra", 0)
@@ -3927,6 +3969,7 @@ Util.OnChar = function(NewCharacter)
 			return OriginalGetMoveVector(...)
 		end
 	end
+	end)
 
 	Ctx.CartDucked = false
 	Ctx.DuckAt = tick()
@@ -3951,6 +3994,7 @@ Util.OnChar = function(NewCharacter)
 
 	Ctx.ACOff = false
 
+	Util.Guard("spawn ui modules", function()
 	local UIModules = Ctx.Hud.Initiator.Main_Game.RemoteListener.Modules
 	Modules.A90             = UIModules:FindFirstChild("A90")
 	Modules.Screech         = UIModules.Screech
@@ -3994,7 +4038,9 @@ Util.OnChar = function(NewCharacter)
             end
         end
     end
+	end)
 
+	Util.Guard("spawn physics", function()
 	CustomPhysics = PhysicalProperties.new(
 		100,
 		RootPart.CustomPhysicalProperties.Friction,
@@ -4010,7 +4056,9 @@ Util.OnChar = function(NewCharacter)
 			end
 		end
 	end
+	end)
 
+	Util.Guard("spawn handlers", function()
 	Links.LibraryCodeHandler1 = LocalPlayer.PlayerGui.PermUI.Hints.ChildAdded:Connect(function()
 		if Toggles.AlertLibraryCode.Value then
 			local Code = Util.ReadLibCode()
@@ -4188,6 +4236,7 @@ Util.OnChar = function(NewCharacter)
 		end
 		Ctx.AnchorAt = tick()
 	end)
+	end)
 
 	Ctx.VelBody = Instance.new("BodyVelocity")
 	Ctx.VelBody.MaxForce = Vector3.new(9e9, 9e9, 9e9)
@@ -4195,6 +4244,7 @@ Util.OnChar = function(NewCharacter)
 	Ctx.FlyMover = Instance.new("BodyVelocity")
 	Ctx.FlyMover.MaxForce = Vector3.new(9e9, 9e9, 9e9)
 
+	Util.Guard("spawn parts", function()
 	Ctx.DiedByScript = false
 	Ctx.TPParts = {}
 	for _, Object in Character:GetDescendants() do
@@ -4207,6 +4257,7 @@ Util.OnChar = function(NewCharacter)
 	Ctx.AnimCheckAt = tick()
 	Ctx.CrouchFireAt = tick()
 	Ctx.OriginalC1 = Character.LowerTorso.Root.C1
+	end)
 
 	local RayParams = RaycastParams.new()
 	RayParams.FilterType = Enum.RaycastFilterType.Exclude
@@ -4220,6 +4271,7 @@ Util.OnChar = function(NewCharacter)
 	end
 
 	Links.MainHandler = Services.RunService.RenderStepped:Connect(function()
+		Util.Guard("frame speed", function()
 		if Services.Workspace:FindFirstChild("Camera") then
 			Camera = Services.Workspace:FindFirstChild("Camera")
 		end
@@ -4227,7 +4279,9 @@ Util.OnChar = function(NewCharacter)
 		if Toggles.SpeedBoostSwitch.Value then
 			Humanoid.WalkSpeed = Util.SpeedNow() + Options.SpeedBoostSlider.Value
 		end
+		end)
 
+		Util.Guard("frame misc", function()
 		if Ctx.LagOn or (Options.SpeedBoostSlider.Value <= 6 and Options.FlySpeed.Value <= 21) then
 			CollisionPartClone.Massless = true
 		end
@@ -4258,7 +4312,9 @@ Util.OnChar = function(NewCharacter)
 		if Toggles.PositionSpoof.Value and RemotesFolder:FindFirstChild("Crouch") then
 			RemotesFolder.Crouch:FireServer(true, true)
 		end
+		end)
 
+		Util.Guard("frame collision", function()
 		if Floor ~= "Fools" and Floor ~= "OldHotel" and not Camera:FindFirstChild("MinecartRig") then
 			RootPart.CanCollide = false
 		end
@@ -4309,7 +4365,9 @@ Util.OnChar = function(NewCharacter)
 
 		CollisionClone.CollisionGroup = Collision.CollisionGroup
 		CollisionClone.Position = RootPart.Position + Vector3.new(0, Toggles.PositionSpoof.Value and 1.75 or 0.18, 0)
+		end)
 
+		Util.Guard("frame movers", function()
 		if Toggles.VelocityManipulationSwitch.Value then
 			Ctx.VelBody.Parent = RootPart
 			Ctx.VelBody.Velocity = RootPart.CFrame.LookVector * 2.25
@@ -4323,7 +4381,9 @@ Util.OnChar = function(NewCharacter)
 		else
 			Ctx.FlyMover.Parent = nil
 		end
+		end)
 
+		Util.Guard("frame bypass", function()
 		local DoEyesBypass = (Toggles.EvadeEyes.Value and Ctx.EyesOn) or (Toggles.EvadeLookman.Value and Ctx.LookmanOn)
 		if DoEyesBypass then
 			if Floor == "Fools" or Floor == "OldHotel" then
@@ -4353,7 +4413,9 @@ Util.OnChar = function(NewCharacter)
 		if Character:GetAttribute("Crouching") ~= Util.Crouched() then
 			Character:SetAttribute("Crouching", Util.Crouched())
 		end
+		end)
 
+		Util.Guard("frame camera", function()
 		local TPOffset = CFrame.new(Options.ThirdPersonOffsetX.Value, Options.ThirdPersonOffsetY.Value, Options.ThirdPersonOffsetZ.Value)
 
 		if Toggles.ThirdPersonSwitch.Value then
@@ -4373,7 +4435,9 @@ Util.OnChar = function(NewCharacter)
 				Camera.FieldOfView = Options.FieldOfView.Value
 			end
 		end
+		end)
 
+		Util.Guard("frame players", function()
 		local ClosestPlayer = { Distance = math.huge, Object = nil }
 		for _, Player in Services.Players:GetPlayers() do
 			if Player.Character and Player ~= LocalPlayer then
@@ -4390,20 +4454,24 @@ Util.OnChar = function(NewCharacter)
 		if ClosestPlayer.Object and LocalPlayer:GetAttribute("Alive") ~= true then
 			LocalPlayer:SetAttribute("CurrentRoom", ClosestPlayer.Object:GetAttribute("CurrentRoom"))
 		end
+		end)
 	end)
 
 	task.wait(1)
-	if Toggles.PositionSpoof.Value and Floor ~= "Fools" and Floor ~= "OldHotel" then
-		RootPart.CFrame = RootPart.CFrame * CFrame.new(0, -2.346, 0)
-		Humanoid.HipHeight = 0.05
-		RemotesFolder.Crouch:FireServer(true, true)
-	end
+	if Gen ~= Ctx.CharGen then return end
+	Util.Guard("spawn tail", function()
+		if Toggles.PositionSpoof.Value and Floor ~= "Fools" and Floor ~= "OldHotel" then
+			RootPart.CFrame = RootPart.CFrame * CFrame.new(0, -2.346, 0)
+			Humanoid.HipHeight = 0.05
+			RemotesFolder.Crouch:FireServer(true, true)
+		end
 
-	local Jam = Ctx.Hud.Initiator.Main_Game.Health:FindFirstChild("Jam")
-	if Jam and Toggles.StripJamminMusic.Value then
-		Jam.Volume = 0
-		Ctx.MusicMute.Enabled = false
-	end
+		local Jam = Ctx.Hud.Initiator.Main_Game.Health:FindFirstChild("Jam")
+		if Jam and Toggles.StripJamminMusic.Value then
+			Jam.Volume = 0
+			Ctx.MusicMute.Enabled = false
+		end
+	end)
 end
 
 Util.FadeHideSpots = function(Model)
@@ -5837,6 +5905,16 @@ LocalPlayer.CharacterAdded:Connect(function(NewCharacter)
 	end
 	task.wait(0.5)
 	Util.OnChar(NewCharacter)
+end)
+
+-- safety net: if the character exists but the main loop is gone (setup died), rebuild it
+task.spawn(function()
+	while task.wait(2) do
+		local Char = LocalPlayer.Character
+		if Char and Char.Parent and not Links.MainHandler and not Ctx.CharBusy then
+			Util.OnChar(Char)
+		end
+	end
 end)
 
 Library:OnUnload(function()
