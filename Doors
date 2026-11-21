@@ -3470,6 +3470,68 @@ Toggles.MarkArrowsSwitch:OnChanged(function(V)    DHub.ESPKit:SetArrows(V) end)
 Options.MarkArrowsRadius:OnChanged(function(V)    DHub.ESPKit:SetArrowRadius(V) end)
 
 Boxes.MineAutos = Tabs.Mines:AddLeftGroupbox("Mine Autos")
+local DoorValvesRunning = false
+Boxes.MineAutos:AddButton({
+	Text = "Auto Complete Door 200",
+	Tooltip = "Warps to each water pump from the top down and opens its valve until the door is ready. Use it once you are near room 200.",
+	Func = function()
+		if DoorValvesRunning then return end
+		if LatestRoom.Value < 100 or Floor ~= "Mines" then
+			Util.Alert({ Title = "Not available yet", Body = "Get to the last stretch of the mines (room 100+) first." })
+			return
+		end
+		DoorValvesRunning = true
+
+		local InCutscene = false
+		local CutsceneLink = RemotesFolder.Cutscene.OnClientEvent:Connect(function()
+			InCutscene = true
+			task.wait(7)
+			InCutscene = false
+		end)
+
+		local function NextPump()
+			local Best, BestY = nil, -math.huge
+			for _, Object in pairs(Objects.Objectives) do
+				if Object.Name == "WaterPump" and Object.Parent and Object:GetAttribute("Diamond_Completed") ~= true
+					and Object.PrimaryPart and Object.PrimaryPart.Position.Y > BestY
+				then
+					Best, BestY = Object, Object.PrimaryPart.Position.Y
+				end
+			end
+			return Best
+		end
+
+		local function Work(Pump)
+			local Started = tick()
+			while task.wait(0.1) do
+				if tick() - Started > 25 or not Pump.Parent then break end
+				if InCutscene then continue end
+				if Character then Character:PivotTo(Pump:GetPivot()) end
+				local Valve = Pump:FindFirstChild("ValvePrompt", true)
+				if Valve then Util.PressHard(Valve) end
+				if Pump:GetAttribute("Diamond_Completed") then break end
+			end
+		end
+
+		Util.Alert({ Title = "Opening the valves", Body = "Hold on, this takes a moment." })
+		task.spawn(function()
+			local Ok, Err = pcall(function()
+				while task.wait(0.1) do
+					local Pump = NextPump()
+					if not Pump then break end
+					Work(Pump)
+				end
+			end)
+			CutsceneLink:Disconnect()
+			DoorValvesRunning = false
+			if Ok then
+				Util.Alert({ Title = "Valves done", Body = "The door is ready." })
+			else
+				warn("[DiamondHub] door 200 failed: " .. tostring(Err))
+			end
+		end)
+	end
+})
 Boxes.RoomAutos = Tabs.Rooms:AddLeftGroupbox("Room Autos")
 Boxes.RoomExtras = Tabs.Rooms:AddRightGroupbox("Room Extras")
 
@@ -5169,11 +5231,11 @@ local function PressAllowed(Prompt)
 		PressLog[Prompt] = Rec
 	end
 	if Now < Rec.mute then return false end
-	if Now - Rec.last < 0.3 then return false end
+	if Now - Rec.last < 0.12 then return false end
 	if Now - Rec.t0 > 6 then Rec.n = 0 Rec.t0 = Now end
 	Rec.n += 1
 	Rec.last = Now
-	if Rec.n > 8 and not RepeatFriendly[Prompt.Name] then
+	if Rec.n > 14 and not RepeatFriendly[Prompt.Name] then
 		Rec.mute = Now + 10
 		Rec.n = 0
 		return false
@@ -5322,7 +5384,15 @@ Util.Activate = function(Prompt)
 
 	if not PressAllowed(Prompt) then return end
 	TriggerDebounce = true
+	-- executors that honor the hold time would make you stand over every item: fire it instantly
+	local OldHold = Prompt.HoldDuration
+	if OldHold > 0 then Prompt.HoldDuration = 0 end
 	local Fired, Why = pcall(Util.Press, Prompt)
+	if OldHold > 0 then
+		task.delay(0.25, function()
+			if Prompt.Parent and Prompt.HoldDuration == 0 then Prompt.HoldDuration = OldHold end
+		end)
+	end
 	if not Fired then warn("[DiamondHub] interact failed: " .. tostring(Why)) end
 	if Floor == "OldHotel" then task.wait() end
 	TriggerDebounce = false
