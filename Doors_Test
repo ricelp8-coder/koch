@@ -5445,8 +5445,7 @@ Util.Activate = function(Prompt)
 	then return end
 
 	if Prompt:IsDescendantOf(Drops) and Options.AutoInteractIgnoreList.Value["Dropped Items"] then return end
-	local IsTrackLever = Prompt.Parent.Name == "TrackLever"
-	if IsTrackLever and not Util.LeverNeedsPull(Prompt) then return end
+	if Prompt.Parent.Name == "TrackLever" then return end -- handled by the dedicated lever loop below
 	if Prompt.Name == "ActivateEventPrompt" and (Prompt.ActionText == "Close"
 		or Prompt.Parent.Name == "ElevatorBreaker"
 		or (Prompt.Parent.Parent and Prompt.Parent.Parent.Name == "IndustrialGate"))
@@ -5523,7 +5522,6 @@ Util.Activate = function(Prompt)
 		end)
 	end
 	if not Fired then warn("[DiamondHub] interact failed: " .. tostring(Why)) end
-	if IsTrackLever and Fired then Util.LeverPulled(Prompt) end
 	if Floor == "OldHotel" then task.wait() end
 	TriggerDebounce = false
 end
@@ -5562,6 +5560,50 @@ Util.LeverPulled = function(Prompt)
 	Rec.At = tick()
 	Rec.Before = Prompt:GetAttribute("Interactions")
 end
+-- Dedicated loop for track levers: no room/prompt-list/cooldown filters of the generic loop in the way.
+Ctx.LeverList, Ctx.LeverScanAt = {}, 0
+task.spawn(function()
+	while task.wait(0.2) do
+		Util.Guard("track lever", function()
+			if not (Toggles.AutoInteractSwitch.Value or Options.AutoInteractBind:GetState()) then return end
+			if not Character or not Character.Parent or not RootPart then return end
+			if tick() - Ctx.LeverScanAt > 1 then
+				Ctx.LeverScanAt = tick()
+				local List = {}
+				local Cur = tonumber(LatestRoom.Value) or 0
+				for N = Cur - 1, Cur + 1 do
+					local Room = CurrentRooms:FindFirstChild(tostring(N))
+					local Lever = Room and Room:FindFirstChild("TrackLever", true)
+					local Prompt = Lever and Lever:FindFirstChildWhichIsA("ProximityPrompt", true)
+					if Prompt then table.insert(List, { Lever = Lever, Prompt = Prompt }) end
+				end
+				Ctx.LeverList = List
+			end
+			for _, Item in Ctx.LeverList do
+				local Lever, Prompt = Item.Lever, Item.Prompt
+				if Lever.Parent and Prompt.Parent then
+					local Dist = LocalPlayer:DistanceFromCharacter(Lever:GetPivot().Position)
+					if Dist > 0 and Dist <= Prompt.MaxActivationDistance and Util.LeverNeedsPull(Prompt) then
+						local OldHold = Prompt.HoldDuration
+						if OldHold > 0 then Prompt.HoldDuration = 0 end
+						local Fired, Why = pcall(Util.Press, Prompt)
+						if OldHold > 0 then
+							task.delay(0.25, function()
+								if Prompt.Parent and Prompt.HoldDuration == 0 then Prompt.HoldDuration = OldHold end
+							end)
+						end
+						if Fired then
+							Util.LeverPulled(Prompt)
+						else
+							warn("[DiamondHub] lever press failed: " .. tostring(Why))
+						end
+					end
+				end
+			end
+		end)
+	end
+end)
+
 Links.AutoInteract = Services.RunService.Heartbeat:Connect(function()
 	local Active = Toggles.AutoInteractSwitch.Value or Options.AutoInteractBind:GetState()
     if not Active then return end
