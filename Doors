@@ -1,6 +1,4 @@
 -- Diamond Hub / Doors
--- Credit: based on Abysall Hub (original author; repo continued by coolcookiebusiness/AbysallHubContinued).
--- The original source was handed over by its author. Thank you for the groundwork.
 if game.PlaceId == 6516141723 then return end
 if shared.DiamondHubDoors then return end
 shared.DiamondHubDoors = true
