@@ -5430,7 +5430,7 @@ Util.Activate = function(Prompt)
 
 	if Prompt:IsDescendantOf(Drops) and Options.AutoInteractIgnoreList.Value["Dropped Items"] then return end
 	local IsTrackLever = Prompt.Parent.Name == "TrackLever"
-	if IsTrackLever and (Ctx.LeverDone[Prompt.Parent] or not Prompt.Enabled) then return end
+	if IsTrackLever and not Util.LeverNeedsPull(Prompt) then return end
 	if Prompt.Name == "ActivateEventPrompt" and (Prompt.ActionText == "Close"
 		or Prompt.Parent.Name == "ElevatorBreaker"
 		or (Prompt.Parent.Parent and Prompt.Parent.Parent.Name == "IndustrialGate"))
@@ -5507,13 +5507,42 @@ Util.Activate = function(Prompt)
 		end)
 	end
 	if not Fired then warn("[DiamondHub] interact failed: " .. tostring(Why)) end
-	if IsTrackLever and Fired then Ctx.LeverDone[Prompt.Parent] = true end
+	if IsTrackLever and Fired then Util.LeverPulled(Prompt) end
 	if Floor == "OldHotel" then task.wait() end
 	TriggerDebounce = false
 end
 
 Ctx.UseFireAt = tick()
-Ctx.LeverDone = setmetatable({}, { __mode = "k" })
+-- Track levers always start on the wrong (left) side, every pull flips them. Odd pull count = right side = correct.
+-- The pull count comes from the prompt's Interactions attribute when the game keeps it, otherwise from our own pulls.
+Ctx.Levers = setmetatable({}, { __mode = "k" })
+local LeverMaxPulls, LeverGap = 6, 1.5
+Util.LeverRec = function(Prompt)
+	local Rec = Ctx.Levers[Prompt]
+	if not Rec then
+		Rec = { Own = 0, Total = 0, At = 0, Before = nil, Blind = false }
+		Ctx.Levers[Prompt] = Rec
+	end
+	return Rec
+end
+Util.LeverNeedsPull = function(Prompt)
+	if not Prompt.Enabled then return false end
+	local Rec = Util.LeverRec(Prompt)
+	if Rec.Total >= LeverMaxPulls or tick() - Rec.At < LeverGap then return false end
+	local Attr = Prompt:GetAttribute("Interactions")
+	if Rec.Before ~= nil and not Rec.Blind and Attr == Rec.Before then
+		Rec.Blind = true -- the attribute never moved after our pull, stop trusting it
+	end
+	local Count = (type(Attr) == "number" and not Rec.Blind) and Attr or Rec.Own
+	return Count % 2 == 0
+end
+Util.LeverPulled = function(Prompt)
+	local Rec = Util.LeverRec(Prompt)
+	Rec.Own += 1
+	Rec.Total += 1
+	Rec.At = tick()
+	Rec.Before = Prompt:GetAttribute("Interactions")
+end
 Links.AutoInteract = Services.RunService.Heartbeat:Connect(function()
 	local Active = Toggles.AutoInteractSwitch.Value or Options.AutoInteractBind:GetState()
     if not Active then return end
