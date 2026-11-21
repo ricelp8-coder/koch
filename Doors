@@ -1,4 +1,3 @@
--- Diamond Hub / Doors
 if game.PlaceId == 6516141723 then return end
 if shared.DiamondHubDoors then return end
 shared.DiamondHubDoors = true
@@ -4867,7 +4866,6 @@ Util.OnObject = function(Object)
 				local FakePrompt = Object:Clone()
 				FakePrompt:SetAttribute("FakePrompt", true)
 				task.wait()
-				-- the door may have been moved or destroyed while we yielded: leave the real prompt alone then
 				if not OrigParent or Object.Parent ~= OrigParent or not Object:IsDescendantOf(workspace) then
 					FakePrompt:Destroy()
 					table.insert(Objects.Prompts, Object)
@@ -4906,7 +4904,6 @@ Util.OnObject = function(Object)
 					FPEnabledConn:Disconnect()
 					FakePrompt:Destroy()
 				end)
-				-- if the fake ever leaves the world, the real prompt must come back or the door is stuck
 				FakePrompt.AncestryChanged:Connect(function()
 					if not FakePrompt:IsDescendantOf(workspace) then GiveBackReal() end
 				end)

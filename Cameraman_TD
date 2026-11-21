@@ -1806,7 +1806,6 @@ local function onTowerUpgrade(t)
     local id = tid(t)
     if not id then return end
     local new = tonumber(t.Level)
-    -- buff / head refreshes come through this remote too, without a new level (or flagged StatsOnly): not an upgrade
     if t.StatsOnly == true or not new then return end
     mc.upAck[id] = os.clock()
     local pos = mc.id2pos[id]
@@ -2220,7 +2219,6 @@ function MX.place(s, myMatch)
             flash(tostring(s.n) .. ": no unit id (equip it first), step skipped", "Warning")
             return false
         end
-        -- the server drops a placement whose Pos is more than 0.05 away from the CFrame position
         local sendPos = (cf.Position - p).Magnitude > 0.05 and cf.Position or p
         R.TowerAdd:FireServer({Pos = sendPos, CFrame = cf, Name = s.n, UnitId = unitId})
         mc.nextPlaceAt = os.clock() + 0.5
@@ -2389,7 +2387,6 @@ local function doAbility(s, myMatch)
         local moved = waitUntil(function()
             local cur = mc.id2pos[id]
             if cur ~= nil then return (cur - want).Magnitude < 2 end
-            -- the unit can come back under a new id at the target
             local bestD
             for oid, p in pairs(mc.id2pos) do
                 local d = (p - want).Magnitude
