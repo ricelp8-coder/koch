@@ -110,555 +110,11 @@ local function BuildEnvironment()
 end
 
 local function BuildESP()
-local Library = {
-	Font = Enum.Font.RobotoCondensed,
-	Rainbow = false,
-	Tracers = false,
-	Unloaded = false,
-	ShowDistance = false,
-	MatchColors = true,
-	Arrows = false,
-	TextTransparency = 0,
-	TracerOrigin = "Bottom",
-	FillTransparency = 0.75,
-	OutlineTransparency = 0,
-	TextOutlineTransparency = 0,
-	FadeTime = 0,
-	RenderLimit = 240,
-	TracerSize = 0.5,
-	ArrowRadius = 200,
-	TextSize = 20,
-	DistanceSizeRatio = 1,
-	OutlineColor = Color3.fromRGB(255, 255, 255),
-	RainbowColor = Color3.fromRGB(255, 255, 255),
-
-	ElementsEnabled = {},
-	TransparencyEnabled = {},
-	Highlights = {},
-	Labels = {},
-	Frames = {},
-	Lines = {},
-	ArrowsTable = {},
-	ColorTable = {},
-	TextTable = {},
-	ConnectionsTable = {},
-	Objects = {},
-	TotalObjects = {},
-}
-
-local RainbowState = { HueSetup = 0, Hue = 0, Step = 0, Color = Color3.new() }
-local RainbowConnection, CameraConnection
-
-local CloneReference = cloneref or function(O) return O end
-local Players = CloneReference(game:GetService("Players"))
-local CoreGui = getgenv and CloneReference(game:GetService("CoreGui")) or Players.LocalPlayer.PlayerGui
-local Workspace = CloneReference(workspace)
-local RunService = CloneReference(game:GetService("RunService"))
-local TweenService = CloneReference(game:GetService("TweenService"))
-local UserInputService = CloneReference(game:GetService("UserInputService"))
-local LocalPlayer = Players.LocalPlayer
-
-local function GetHiddenUI()
-	if gethui then return gethui() end
-	local Folder = Instance.new("Folder", CoreGui)
-	Folder.Name = ("%032x"):format(math.random(0, 2^31))
-	return Folder
-end
-
-function Library:RandName()
-	local Chars = {}
-	local Pool = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	local PoolLen = #Pool
-	for I = 1, 24 do
-		local Idx = math.random(1, PoolLen)
-		Chars[I] = Pool:sub(Idx, Idx)
-	end
-	return table.concat(Chars)
-end
-
-local HiddenUI = GetHiddenUI()
-local Camera = Workspace.CurrentCamera
-
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.ResetOnSpawn = false
-ScreenGui.IgnoreGuiInset = true
-ScreenGui.Name = Library:RandName()
-ScreenGui.Parent = HiddenUI
-
-local HighlightsFolder = Instance.new("Folder")
-HighlightsFolder.Name = Library:RandName()
-HighlightsFolder.Parent = ScreenGui
-
-local BillboardsFolder = Instance.new("Folder")
-BillboardsFolder.Name = Library:RandName()
-BillboardsFolder.Parent = ScreenGui
-
-local TracersFrame = Instance.new("Frame")
-TracersFrame.Size = UDim2.new(1, 0, 1, 0)
-TracersFrame.BackgroundTransparency = 1
-TracersFrame.Visible = false
-TracersFrame.Name = Library:RandName()
-TracersFrame.Parent = ScreenGui
-
-local ArrowsFrame = Instance.new("Frame")
-ArrowsFrame.Size = UDim2.new(1, 0, 1, 0)
-ArrowsFrame.BackgroundTransparency = 1
-ArrowsFrame.Visible = false
-ArrowsFrame.Name = Library:RandName()
-ArrowsFrame.Parent = ScreenGui
-
-local ArrowTemplate = Instance.new("ImageLabel")
-ArrowTemplate.Image = "rbxassetid://16368985219"
-ArrowTemplate.Size = UDim2.new(0, 50, 0, 50)
-ArrowTemplate.AnchorPoint = Vector2.new(0.5, 0.5)
-ArrowTemplate.BackgroundTransparency = 1
-ArrowTemplate.ImageTransparency = 1
-local ArrowConstraint = Instance.new("UIAspectRatioConstraint")
-ArrowConstraint.AspectRatio = 1
-ArrowConstraint.Name = Library:RandName()
-ArrowConstraint.Parent = ArrowTemplate
-
-local function MakeTween(Instance_, Props)
-	local Info = TweenInfo.new(Library.FadeTime, Enum.EasingStyle.Quad)
-	return TweenService:Create(Instance_, Info, Props)
-end
-
-local function PlayTween(Instance_, Props)
-	MakeTween(Instance_, Props):Play()
-end
-
-local function DestroyObjectData(Object)
-	local Highlight = Library.Highlights[Object]
-	if Highlight then
-		Highlight:Destroy()
-		Library.Highlights[Object] = nil
-	end
-
-	local Frame = Library.Frames[Object]
-	if Frame then
-		Frame:Destroy()
-		Library.Frames[Object] = nil
-	end
-
-	local LineData = Library.Lines[Object]
-	if LineData then
-		if LineData[1] then LineData[1]:Destroy() end
-		Library.Lines[Object] = nil
-	end
-
-	local Arrow = Library.ArrowsTable[Object]
-	if Arrow then
-		Arrow:Destroy()
-		Library.ArrowsTable[Object] = nil
-	end
-
-	local Conns = Library.ConnectionsTable[Object]
-	if Conns then
-		for _, Conn in ipairs(Conns) do
-			Conn:Disconnect()
-		end
-		Library.ConnectionsTable[Object] = nil
-	end
-
-	Library.Labels[Object] = nil
-	Library.ColorTable[Object] = nil
-	Library.TextTable[Object] = nil
-	Library.ElementsEnabled[Object] = nil
-	Library.TransparencyEnabled[Object] = nil
-	Library.Objects[Object] = nil
-
-	for Idx = #Library.TotalObjects, 1, -1 do
-		if Library.TotalObjects[Idx] == Object then
-			table.remove(Library.TotalObjects, Idx)
-			break
-		end
-	end
-end
-
-function Library:AddESP(Parameters)
-	local Object = Parameters.Object
-	if Library.ElementsEnabled[Object] == true or Library.Unloaded == true then return end
-	if not Object:IsA("BasePart") and not Object:IsA("Model") then return end
-
-	Library.ElementsEnabled[Object] = true
-	Library.TransparencyEnabled[Object] = false
-	Library.ConnectionsTable[Object] = Library.ConnectionsTable[Object] or {}
-
-	if Library.Highlights[Object] then
-		Library.Highlights[Object]:Destroy()
-		Library.Highlights[Object] = nil
-	end
-
-	local Highlight = Instance.new("Highlight")
-	Highlight.FillTransparency = 1
-	Highlight.OutlineTransparency = 1
-	Highlight.Name = Library:RandName()
-	Highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-	Highlight.Adornee = Object
-	Highlight.Parent = HighlightsFolder
-	Library.Highlights[Object] = Highlight
-
-	local TextFrame = Instance.new("Frame")
-	TextFrame.Visible = false
-	TextFrame.Name = Library:RandName()
-	TextFrame.Size = UDim2.fromScale(1, 1)
-	TextFrame.BackgroundTransparency = 1
-	TextFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-	TextFrame.Parent = BillboardsFolder
-
-	local TextLabel = Instance.new("TextLabel")
-	TextLabel.Name = Library:RandName()
-	TextLabel.BackgroundTransparency = 1
-	TextLabel.Text = Parameters.Text
-	TextLabel.TextTransparency = 1
-	TextLabel.TextStrokeTransparency = Library.TextOutlineTransparency
-	TextLabel.Size = UDim2.new(1, 0, 1, 0)
-	TextLabel.Font = Library.Font
-	TextLabel.TextSize = Library.TextSize
-	TextLabel.RichText = true
-	TextLabel.TextColor3 = Parameters.Color
-	TextLabel.Parent = TextFrame
-
-	Library.Frames[Object] = TextFrame
-	Library.Labels[Object] = TextLabel
-	Library.ColorTable[Object] = Parameters.Color
-	Library.TextTable[Object] = Parameters.Text
-	Library.Objects[Object] = Object
-	table.insert(Library.TotalObjects, Object)
-
-	PlayTween(Highlight, { FillTransparency = Library.FillTransparency })
-	PlayTween(Highlight, { OutlineTransparency = Library.OutlineTransparency })
-
-	local TextFadeIn = MakeTween(TextLabel, { TextTransparency = Library.TextTransparency })
-	TextFadeIn.Completed:Once(function()
-		Library.TransparencyEnabled[Object] = true
-	end)
-	TextFadeIn:Play()
-	PlayTween(TextLabel, { TextStrokeTransparency = Library.TextOutlineTransparency })
-
-	local LineFrame = Instance.new("Frame")
-	LineFrame.Size = UDim2.new(0, 0, 0, 0)
-	LineFrame.BackgroundTransparency = 1
-	LineFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-	LineFrame.Name = Library:RandName()
-	LineFrame.Parent = TracersFrame
-
-	local Stroke = Instance.new("UIStroke")
-	Stroke.Thickness = Library.TracerSize
-	Stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	Stroke.Transparency = 1
-	Stroke.Name = Library:RandName()
-	Stroke.Parent = LineFrame
-
-	PlayTween(LineFrame, { BackgroundTransparency = 0 })
-	PlayTween(Stroke, { Transparency = 0 })
-	Library.Lines[Object] = { LineFrame, Stroke }
-
-	task.spawn(function()
-		local Last = 0
-
-		local function Render()
-			if not Object or not Object:IsDescendantOf(game) then
-				Library:RemoveESP(Object)
-				return
-			end
-
-			local ObjectPos = Object:GetPivot().Position
-			local ScreenPoint, OnScreen = Camera:WorldToViewportPoint(ObjectPos)
-
-			local Frame = Library.Frames[Object]
-			local Label = Library.Labels[Object]
-			local CachedHighlight = Library.Highlights[Object]
-			local LineData = Library.Lines[Object]
-
-			if LineData and LineData[1] then
-				LineData[1].Visible = OnScreen
-			end
-
-			if Frame then
-				Frame.Visible = OnScreen
-				if OnScreen then
-					Frame.Position = UDim2.new(0, ScreenPoint.X, 0, ScreenPoint.Y)
-				end
-			end
-
-			if not OnScreen then
-				if CachedHighlight then
-					CachedHighlight:Destroy()
-					Library.Highlights[Object] = nil
-					CachedHighlight = nil
-				end
-			elseif Library.ElementsEnabled[Object] == true and not CachedHighlight then
-				CachedHighlight = Instance.new("Highlight")
-				CachedHighlight.FillTransparency = 1
-				CachedHighlight.OutlineTransparency = 1
-				CachedHighlight.Name = Library:RandName()
-				CachedHighlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-				CachedHighlight.Adornee = Object
-				CachedHighlight.Parent = HighlightsFolder
-				Library.Highlights[Object] = CachedHighlight
-			end
-
-			local ActiveColor = Library.Rainbow and RainbowState.Color or Library.ColorTable[Object] or Color3.fromRGB(255, 255, 255)
-
-			if Label then
-				Label.TextColor3 = ActiveColor
-			end
-
-			if CachedHighlight then
-				local Distance = math.floor((Camera.CFrame.Position - ObjectPos).Magnitude)
-				local DistanceText = Library.ShowDistance and ("\n [" .. Distance .. "] ") or ""
-				if Label then
-					Label.Text = Library.TextTable[Object] .. DistanceText
-				end
-
-				CachedHighlight.Enabled = true
-				CachedHighlight.FillColor = ActiveColor
-				CachedHighlight.OutlineColor = Library.MatchColors and ActiveColor or Library.OutlineColor
-
-				if Library.TransparencyEnabled[Object] == true then
-					CachedHighlight.FillTransparency = Library.FillTransparency
-					CachedHighlight.OutlineTransparency = Library.OutlineTransparency
-					if Label then
-						Label.TextTransparency = Library.TextTransparency
-						Label.TextStrokeTransparency = Library.TextOutlineTransparency
-					end
-				end
-			end
-
-			if LineData and CachedHighlight and Library.Tracers == true and OnScreen then
-				local ScreenSize = Camera.ViewportSize
-				local Origin
-
-				if Library.TracerOrigin == "Center" then
-					Origin = Vector2.new(ScreenSize.X / 2, ScreenSize.Y / 2)
-				elseif Library.TracerOrigin == "Top" then
-					Origin = Vector2.new(ScreenSize.X / 2, 0)
-				elseif Library.TracerOrigin == "Mouse" then
-					local MouseLoc = UserInputService:GetMouseLocation()
-					Origin = Vector2.new(LocalPlayer:GetMouse().X, MouseLoc.Y)
-				else
-					Origin = Vector2.new(ScreenSize.X / 2, ScreenSize.Y)
-				end
-
-				local Destination = Vector2.new(ScreenPoint.X, ScreenPoint.Y)
-				local MidPoint = (Origin + Destination) / 2
-				local Rotation = math.deg(math.atan2(Destination.Y - Origin.Y, Destination.X - Origin.X))
-				local Length = (Origin - Destination).Magnitude
-				local LF = LineData[1]
-				local SK = LineData[2]
-
-				LF.Position = UDim2.new(0, MidPoint.X, 0, MidPoint.Y)
-				LF.Size = UDim2.new(0, Length, 0, 1)
-				LF.Rotation = Rotation
-				LF.BackgroundColor3 = ActiveColor
-				LF.BorderSizePixel = 0
-				LF.Visible = true
-				SK.Color = ActiveColor
-				SK.Thickness = Library.TracerSize
-			end
-
-			if Library.Arrows == true then
-				local Arrow = Library.ArrowsTable[Object]
-				if Arrow == nil and Library.ElementsEnabled[Object] == true then
-					Arrow = ArrowTemplate:Clone()
-					Arrow.Name = Library:RandName()
-					Arrow:WaitForChild(ArrowConstraint.Name, 5)
-					Arrow.Parent = ArrowsFrame
-					Library.ArrowsTable[Object] = Arrow
-					PlayTween(Arrow, { ImageTransparency = 0 })
-				elseif Arrow and Library.ElementsEnabled[Object] == true then
-					if OnScreen and ScreenPoint.Z > 0 then
-						Arrow.Visible = false
-					else
-						local ScreenSize = Camera.ViewportSize
-						local ScreenCenter = Vector2.new(ScreenSize.X / 2, ScreenSize.Y / 2)
-						local ToObj = (ObjectPos - Camera.CFrame.Position).Unit
-						local Dir = Vector2.new(ScreenPoint.X, ScreenPoint.Y) - ScreenCenter
-						if Camera.CFrame.LookVector:Dot(ToObj) < 0 then
-							Dir = -Dir
-						end
-						local Angle = math.atan2(Dir.Y, Dir.X)
-						local Radius = math.min(ScreenSize.X, ScreenSize.Y) / 2 - (400 - Library.ArrowRadius)
-						local ArrowPos = ScreenCenter + Dir.Unit * Radius
-
-						Arrow.Position = UDim2.new(0, ArrowPos.X, 0, ArrowPos.Y)
-						Arrow.Rotation = math.deg(Angle) - 90
-						Arrow.Visible = true
-						Arrow.ImageColor3 = Library.Rainbow and Library.RainbowColor or Library.ColorTable[Object]
-					end
-				end
-			end
-		end
-
-		local Connection
-		Connection = RunService.Heartbeat:Connect(function(Delta)
-			Last = Last + Delta
-			if Last >= 1 / Library.RenderLimit then
-				Last = 0
-				if Library.ElementsEnabled[Object] ~= true then
-					Connection:Disconnect()
-					return
-				end
-				Render()
-			end
-		end)
-		table.insert(Library.ConnectionsTable[Object], Connection)
-	end)
-end
-
-function Library:RemoveESP(Object)
-	if Library.Unloaded == true or Library.ElementsEnabled[Object] ~= true then return end
-	Library.ElementsEnabled[Object] = false
-	Library.TransparencyEnabled[Object] = false
-
-	local Label = Library.Labels[Object]
-	if Label then
-		PlayTween(Label, { TextTransparency = 1 })
-	end
-
-	local LineData = Library.Lines[Object]
-	if LineData then
-		if LineData[1] then PlayTween(LineData[1], { BackgroundTransparency = 1 }) end
-		if LineData[2] then PlayTween(LineData[2], { Transparency = 1 }) end
-	end
-
-	local Highlight = Library.Highlights[Object]
-	if Highlight then
-		PlayTween(Highlight, { FillTransparency = 1 })
-		PlayTween(Highlight, { OutlineTransparency = 1 })
-	end
-
-	local Arrow = Library.ArrowsTable[Object]
-	if Arrow then
-		PlayTween(Arrow, { ImageTransparency = 1 })
-	end
-
-	local FadeTime = Library.FadeTime
-
-	if not Object.Parent then
-		task.delay(FadeTime + 0.05, function()
-			if Library.ElementsEnabled[Object] == false then
-				DestroyObjectData(Object)
-			end
-		end)
-	else
-		task.delay(FadeTime + 0.05, function()
-			if Library.ElementsEnabled[Object] == false then
-				DestroyObjectData(Object)
-			else
-				local ReHighlight = Library.Highlights[Object]
-				if ReHighlight then
-					PlayTween(ReHighlight, { FillTransparency = Library.FillTransparency })
-					PlayTween(ReHighlight, { OutlineTransparency = Library.OutlineTransparency })
-				end
-			end
-		end)
-	end
-end
-
-function Library:UpdateObjectText(Object, Text)
-	if Library.TextTable[Object] ~= nil then
-		Library.TextTable[Object] = Text
-	end
-end
-
-function Library:UpdateObjectColor(Object, Color)
-	Library.ColorTable[Object] = Color
-	if Library.Labels[Object] and Library.Rainbow ~= true then
-		Library.Labels[Object].TextColor3 = Color
-	end
-end
-
-function Library:SetColorTable(Name, Color) Library.ColorTable[Name] = Color end
-function Library:SetFadeTime(Number) Library.FadeTime = Number end
-function Library:SetRenderLimit(Number) Library.RenderLimit = Number end
-
-function Library:SetTextTransparency(Number)
-	Library.TextTransparency = Number
-	for _, Label in pairs(Library.Labels) do Label.TextTransparency = Number end
-end
-
-function Library:SetFillTransparency(Number)
-	Library.FillTransparency = Number
-	for _, Highlight in pairs(Library.Highlights) do
-		if Highlight:IsA("Highlight") then Highlight.FillTransparency = Number end
-	end
-end
-
-function Library:SetOutlineTransparency(Number)
-	Library.OutlineTransparency = Number
-	for _, Highlight in pairs(Library.Highlights) do
-		if Highlight:IsA("Highlight") then Highlight.OutlineTransparency = Number end
-	end
-end
-
-function Library:SetTextSize(Number)
-	Library.TextSize = Number
-	for _, Label in pairs(Library.Labels) do Label.TextSize = Number end
-end
-
-function Library:SetTextOutlineTransparency(Number)
-	Library.TextOutlineTransparency = Number
-	for _, Label in pairs(Library.Labels) do Label.TextStrokeTransparency = Number end
-end
-
-function Library:SetFont(Font)
-	Library.Font = Font
-	for _, Label in pairs(Library.Labels) do Label.Font = Font end
-end
-
-function Library:SetOutlineColor(Color) Library.OutlineColor = Color end
-function Library:SetRainbow(Value) Library.Rainbow = Value end
-function Library:SetShowDistance(Value) Library.ShowDistance = Value end
-function Library:SetMatchColors(Value) Library.MatchColors = Value end
-
-function Library:SetTracers(Value)
-	Library.Tracers = Value
-	TracersFrame.Visible = Value
-end
-
-function Library:SetArrows(Value)
-	Library.Arrows = Value
-	ArrowsFrame.Visible = Value
-end
-
-function Library:SetArrowRadius(Value) Library.ArrowRadius = Value end
-function Library:SetTracerOrigin(Value) Library.TracerOrigin = Value end
-function Library:SetDistanceSizeRatio(Value) Library.DistanceSizeRatio = Value end
-function Library:SetTracerSize(Value) Library.TracerSize = 0.5 * Value end
-
-function Library:Unload()
-	if Library.Unloaded then return end
-	for _, Object in pairs(Library.Objects) do
-		Library:RemoveESP(Object)
-	end
-	Library.Unloaded = true
-	for _, Conns in pairs(Library.ConnectionsTable) do
-		for _, Conn in ipairs(Conns) do Conn:Disconnect() end
-	end
-	if RainbowConnection then RainbowConnection:Disconnect() end
-	if CameraConnection then CameraConnection:Disconnect() end
-	ScreenGui:Destroy()
-end
-
-RainbowConnection = RunService.RenderStepped:Connect(function(Delta)
-	RainbowState.Step = RainbowState.Step + Delta
-	if RainbowState.Step >= (1 / 60) then
-		RainbowState.Step = 0
-		RainbowState.HueSetup = RainbowState.HueSetup + (1 / 400)
-		if RainbowState.HueSetup > 1 then RainbowState.HueSetup = 0 end
-		RainbowState.Hue = RainbowState.HueSetup
-		RainbowState.Color = Color3.fromHSV(RainbowState.Hue, 0.8, 1)
-		Library.RainbowColor = RainbowState.Color
-	end
-end)
-
-CameraConnection = Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
-	Camera = Workspace.CurrentCamera
-end)
-
-return Library
+	local Root = (UIX.base:gsub("UI/$", "ESP/"))
+	local Ok, Src = pcall(function() return game:HttpGet(Root .. "ESPLib.lua") end)
+	local Fn = Ok and loadstring(Src)
+	if not Fn then error("ESP library failed to load from " .. Root) end
+	return Fn()
 end
 
 local DHub = {
@@ -1979,10 +1435,10 @@ Boxes.Move:AddSlider("FlySpeed", {
 })
 Boxes.Move:AddDivider()
 Boxes.Move:AddToggle("NoclipSwitch", {
-	Text = "Ghost Mode", Default = false, Tooltip = "Turns off collisions so you can walk through walls and props."
+	Text = "Noclip", Default = false, Tooltip = "Turns off collisions so you can walk through walls and props."
 })
 Boxes.Move:AddToggle("StripAcceleration", {
-	Text = "Instant Stop", Default = false, Tooltip = "Prevents the slippery movement so you halt the moment you let go."
+	Text = "No Acceleration", Default = false, Tooltip = "Prevents the slippery movement so you halt the moment you let go."
 })
 
 local CustomPhysics
@@ -1994,7 +1450,7 @@ Options.SpeedBoostSlider:OnChanged(function(Value)
 end)
 
 Toggles.NoclipSwitch:AddKeyPicker("NoclipBind", {
-	Text = "Ghost Mode", Default = "N", Mode = "Toggle", SyncToggleState = true
+	Text = "Noclip", Default = "N", Mode = "Toggle", SyncToggleState = true
 })
 Toggles.StripAcceleration:OnChanged(function(Value)
 	for Index, Old in PartProps do
@@ -2062,10 +1518,10 @@ Boxes.Reach:AddSlider("PromptReachSlider", {
 	Text = "Prompt Range Scale", Min = 1, Max = 2, Default = 1, Rounding = 1, Compact = true
 })
 Boxes.Reach:AddToggle("AutoInteractSwitch", {
-	Text = "Auto Use", Default = false, Tooltip = "Triggers every prompt within range automatically. Use the ignore list to skip some."
+	Text = "Auto Interact", Default = false, Tooltip = "Triggers every prompt within range automatically. Use the ignore list to skip some."
 })
 Toggles.AutoInteractSwitch:AddKeyPicker("AutoInteractBind", {
-    Text = "Auto Use",
+    Text = "Auto Interact",
     Default = "R",
     Mode = "Toggle",
     SyncToggleState = true
@@ -2196,68 +1652,6 @@ Boxes.Tools:AddButton({
 		end
 	end
 })
-local TpNextDoorConnection
-
-local function getNextClosedDoor()
-	if not Character then return nil end
-
-	local GameData = game:GetService("ReplicatedStorage"):FindFirstChild("GameData")
-	if not GameData then return nil end
-
-	local LatestRoom = GameData:FindFirstChild("LatestRoom")
-	if not LatestRoom then return nil end
-
-	local startRoom = LatestRoom.Value
-	local bestDoor = nil
-	local bestNumber = math.huge
-
-	for _, obj in ipairs(workspace:GetDescendants()) do
-		if obj.Name == "Door" and obj:IsA("Model") then
-			local openAttr = obj:GetAttribute("Open")
-			if openAttr == false or openAttr == nil then
-				local roomModel = obj.Parent
-				local roomNum = tonumber(roomModel and roomModel.Name)
-
-				if roomNum and roomNum >= startRoom and roomNum < bestNumber then
-					bestNumber = roomNum
-					bestDoor = obj
-				end
-			end
-		end
-	end
-
-	return bestDoor
-end
-
-
-Toggles.TpNextDoor = Boxes.Tools:AddToggle("TpNextDoor", {
-	Text = "Auto Door Warp",
-	Tooltip = "Keeps teleporting you to the next closed door in order.",
-	Default = false
-})
-
-Toggles.TpNextDoor:OnChanged(function(TpNextDoorEnabled)
-	if TpNextDoorConnection then
-		task.cancel(TpNextDoorConnection)
-		TpNextDoorConnection = nil
-	end
-
-	if not TpNextDoorEnabled then
-		return
-	end
-
-	TpNextDoorConnection = task.spawn(function()
-		while Toggles.TpNextDoor.Value do
-			local door = getNextClosedDoor()
-			if door and Character then
-				Character:PivotTo(door:GetPivot() * CFrame.new(0, -1, 0))
-			end
-			task.wait(0.15)
-		end
-		TpNextDoorConnection = nil
-	end)
-end)
-
 
 Boxes.Immunity = Tabs.Cheats:AddRightGroupbox("Entity Immunity")
 
@@ -3363,11 +2757,11 @@ end)
 
 Boxes.Special = Tabs.Cheats:AddLeftGroupbox("Special")
 Boxes.Special:AddToggle("BlockGuardcheat", {
-	Text = "Anticheat Off", Default = false,
+	Text = "Disable Anti Cheat", Default = false,
 	Tooltip = "Turns the anticheat off after you grab a ladder. It comes back after a cutscene or halt room."
 })
 Boxes.Special:AddToggle("VelocityManipulationSwitch", {
-	Text = "Velocity Edit", Default = false,
+	Text = "Velocity Manipulation", Default = false,
 	Tooltip = "Keeps nudging you forward so the anti-noclip check doesn't pull you back."
 })
 Toggles.BlockGuardcheat:OnChanged(function(Value)
@@ -3377,7 +2771,7 @@ Toggles.BlockGuardcheat:OnChanged(function(Value)
 	end
 end)
 Toggles.VelocityManipulationSwitch:AddKeyPicker("VelocityManipulationBind", {
-	Text = "Velocity Edit", Default = "V",
+	Text = "Velocity Manipulation", Default = "V",
 	Mode = Library.IsMobile and "Toggle" or "Hold", SyncToggleState = true
 })
 
@@ -3400,7 +2794,7 @@ Boxes.Special:AddDropdown("InfiniteItemsList", {
 
 Boxes.Special:AddDivider()
 Boxes.Special:AddToggle("PositionSpoof", {
-	Text = "Invincible", Default = false,
+	Text = "God Mode", Default = false,
 	Tooltip = "Hides your character underground on the server, so rush-type entities pass over you."
 })
 Toggles.PositionSpoof:OnChanged(function(Value)
@@ -3416,7 +2810,7 @@ Toggles.PositionSpoof:OnChanged(function(Value)
 	end
 end)
 Toggles.PositionSpoof:AddKeyPicker("PositionSpoof", {
-	Text = "Invincible", Default = "B", Mode = "Toggle", SyncToggleState = true
+	Text = "God Mode", Default = "B", Mode = "Toggle", SyncToggleState = true
 })
 
 Boxes.Strip = Tabs.Cheats:AddLeftGroupbox("Disable Effects")
@@ -3718,22 +3112,6 @@ Boxes.Alerts:AddToggle("AlertEntities",    { Text = "Alert: Entities",    Defaul
 
 Boxes.Alerts:AddDivider()
 
-local ItemsToNotify = {}
-for Index, Name in pairs(ItemNames) do
-	if not table.find(ItemsToNotify, Name) then
-		table.insert(ItemsToNotify, Name)
-	end
-end
-table.sort(ItemsToNotify)
-
-Boxes.Alerts:AddDropdown("AlertItemList", {
-	Text = "Items Shown",
-	Values = ItemsToNotify,
-	Multi = true, AllowNull = true
-})
-Boxes.Alerts:AddToggle("AlertItemsSwitch",    { Text = "Alert: Items",    Default = false, Tooltip = "Pops a notification whenever a selected item shows up." })
-Boxes.Alerts:AddToggle("AlertItemsShowDistance",    { Text = "Distance Label",    Default = false, Tooltip = "Adds the distance to the item notification." })
-Boxes.Alerts:AddDivider()
 Boxes.Alerts:AddToggle("AlertLibraryCode", { Text = "Library Code Alert", Default = false, Tooltip = "Shows the padlock code as soon as enough hints are collected." })
 Boxes.Alerts:AddToggle("AlertOxygen",      { Text = "Oxygen Alert", Default = false, Tooltip = "Shows your oxygen level as a caption whenever it changes." })
 Boxes.Alerts:AddToggle("AlertHasteTime",   { Text = "Haste Clock",   Default = false, Tooltip = "Shows the time left before Haste spawns." })
@@ -5315,14 +4693,6 @@ Util.OnObject = function(Object)
 			end)
 		end
 
-		if Toggles.AlertItemsSwitch.Value and Options.AlertItemList.Value[ItemNames[Name]] and Object.Parent.Name ~= "Drops" then
-			if Toggles.AlertItemsShowDistance.Value then
-				Util.Alert({ Title = "Item '" .. ItemNames[Name] .. "' just appeared.", Body = "It is '" .. math.round(LocalPlayer:DistanceFromCharacter(Object.PrimaryPart.Position)) .. "' studs from you." })
-			else
-				Util.Alert({ Title = "Item '" .. ItemNames[Name] .. "' just appeared."})
-			end
-		end
-
 		table.insert(Objects.Items, Object)
 	elseif Name == "Green_Herb" then
 		if Toggles.ItemMarkSwitch.Value then Util.Mark({ Object = Object, Text = "Green Herb", Color = Options.ItemMarkColor.Value }, true) end
@@ -5497,10 +4867,17 @@ Util.OnObject = function(Object)
 				or (Object.Parent and Object.Parent.Parent and Object.Parent.Parent.Name == "Locker_Small_Locked" and Object.Name == "ActivateEventPrompt")
 
 			if IsLockPrompt then
+				local OrigParent = Object.Parent
 				local FakePrompt = Object:Clone()
 				FakePrompt:SetAttribute("FakePrompt", true)
 				task.wait()
-				FakePrompt.Parent = Object.Parent
+				-- the door may have been moved or destroyed while we yielded: leave the real prompt alone then
+				if not OrigParent or Object.Parent ~= OrigParent or not Object:IsDescendantOf(workspace) then
+					FakePrompt:Destroy()
+					table.insert(Objects.Prompts, Object)
+					return
+				end
+				FakePrompt.Parent = OrigParent
 
 				FakePrompt:SetAttribute("HoldDuration_Old", Object:GetAttribute("HoldDuration_Old"))
 				FakePrompt:SetAttribute("RequiresLineOfSight_Old", Object:GetAttribute("RequiresLineOfSight_Old"))
@@ -5520,14 +4897,22 @@ Util.OnObject = function(Object)
 				local FPEnabledConn = Object:GetPropertyChangedSignal("Enabled"):Connect(function()
 					FakePrompt.Enabled = Object.Enabled
 				end)
-				Object:GetPropertyChangedSignal("ActionText"):Once(function()
-					Object.Parent = FakePrompt.Parent
-					FakePrompt:Destroy()
+				local function GiveBackReal()
 					FPEnabledConn:Disconnect()
-				end)
+					if Object.Parent == Ctx.PromptBox and OrigParent and OrigParent.Parent then
+						Object.Parent = OrigParent
+					end
+					DummyPrompts[FakePrompt] = nil
+					FakePrompt:Destroy()
+				end
+				Object:GetPropertyChangedSignal("ActionText"):Once(GiveBackReal)
 				Object.Destroying:Once(function()
-					FakePrompt:Destroy()
 					FPEnabledConn:Disconnect()
+					FakePrompt:Destroy()
+				end)
+				-- if the fake ever leaves the world, the real prompt must come back or the door is stuck
+				FakePrompt.AncestryChanged:Connect(function()
+					if not FakePrompt:IsDescendantOf(workspace) then GiveBackReal() end
 				end)
 				table.insert(Links, FPEnabledConn)
 				table.insert(Objects.Prompts, FakePrompt)
@@ -5562,6 +4947,10 @@ end
 
 Links.PromptAnimationFixer1 = Services.ProximityPromptService.PromptButtonHoldBegan:Connect(function(Object)
 	if not Object:GetAttribute("FakePrompt") then return end
+	local function FireReal()
+		local Real = DummyPrompts[Object]
+		if Real then Util.Press(Real) end
+	end
 	local ToolNames = { "Lockpick","Shears","SkeletonKey","Key","GeneratorFuse","KeyElectrical","KeyBackdoor","KeyIron", "Multitool" }
 	local AnimateToolNames = { "Lockpick","Shears","SkeletonKey","Key","KeyElectrical","KeyBackdoor","KeyIron", "Multitool" }
 	local Tool
@@ -5573,19 +4962,19 @@ Links.PromptAnimationFixer1 = Services.ProximityPromptService.PromptButtonHoldBe
 		or (Object.Parent and Object.Parent:GetAttribute("Locked") == true)
 		or (Object.Parent and Object.Parent.Parent and Object.Parent.Parent.Name == "Locker_Small_Locked" and Object.Name == "ActivateEventPrompt")
 	if IsLockPrompt then
-		if Options.AutoInteractIgnoreList.Value["Locks"] then return end
+		if Options.AutoInteractIgnoreList.Value["Locks"] then FireReal() return end
 		local KeyItems = { "Key","GeneratorFuse","KeyBackdoor","KeyElectrical","KeyIron","Lockpick","SkeletonKey","Shears","Multitool" }
 		local OffhandKeyItems = { "Key","GeneratorFuse","KeyElectrical","KeyIron" }
 		local HasKey = false
 		for _, K in KeyItems do if Util.Holds(K, true) then HasKey = true break end end
 		for _, K in OffhandKeyItems do if Util.Holds(K) then HasKey = true break end end
-		if not HasKey then return end
+		if not HasKey then FireReal() return end
 	end
 
-	if Prompt.Parent.Name == "CuttableVines" and not Util.Holds("Shears", true) and not Util.Holds("Multitool", true) or Prompt.Parent.Name == "Chest_Vine" and not Util.Holds("Shears", true) and not Util.Holds("Multitool", true) or Prompt.Parent.Name == "Cellar" and not Util.Holds("Shears", true) and not Util.Holds("Multitool", true) then return end
-	if Prompt.Parent.Name == "SkullLock" and not Util.Holds("SkeletonKey", true) then return end
-	if Prompt.Parent.Name == "Lock1" and not Util.Holds("Lockpick", true) and not Util.Holds("Multitool", true) or Prompt.Parent.Name == "Lock2" and not Util.Holds("Lockpick", true) and not Util.Holds("Multitool", true) then return end
-	if Util.Holds("Shears", true) and IsLockPrompt and Prompt.Parent.Name ~= "CuttableVines" and Prompt.Parent.Name ~= "Chest_Vine" and Prompt.Parent.Name ~= "Cellar" then return end
+	if Prompt.Parent.Name == "CuttableVines" and not Util.Holds("Shears", true) and not Util.Holds("Multitool", true) or Prompt.Parent.Name == "Chest_Vine" and not Util.Holds("Shears", true) and not Util.Holds("Multitool", true) or Prompt.Parent.Name == "Cellar" and not Util.Holds("Shears", true) and not Util.Holds("Multitool", true) then FireReal() return end
+	if Prompt.Parent.Name == "SkullLock" and not Util.Holds("SkeletonKey", true) then FireReal() return end
+	if Prompt.Parent.Name == "Lock1" and not Util.Holds("Lockpick", true) and not Util.Holds("Multitool", true) or Prompt.Parent.Name == "Lock2" and not Util.Holds("Lockpick", true) and not Util.Holds("Multitool", true) then FireReal() return end
+	if Util.Holds("Shears", true) and IsLockPrompt and Prompt.Parent.Name ~= "CuttableVines" and Prompt.Parent.Name ~= "Chest_Vine" and Prompt.Parent.Name ~= "Cellar" then FireReal() return end
 
 	if Tool and table.find(AnimateToolNames, Tool.Name) and Ctx.AnimUse then
 		Ctx.AnimUseBreak:Stop()
