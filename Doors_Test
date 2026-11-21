@@ -4367,6 +4367,22 @@ Util.OnCharCore = function(NewCharacter, Gen)
 		CollisionClone.Position = RootPart.Position + Vector3.new(0, Toggles.PositionSpoof.Value and 1.75 or 0.18, 0)
 		end)
 
+		Util.Guard("frame doors", function()
+			if tick() - (Ctx.DoorClearAt or 0) < 0.25 then return end
+			Ctx.DoorClearAt = tick()
+			local Cur = tonumber(LatestRoom.Value) or 0
+			for N = Cur - 1, Cur + 1 do
+				local Room = CurrentRooms:FindFirstChild(tostring(N))
+				local Door = Room and Room:FindFirstChild("Door")
+				-- an opened door keeps blocking until its animation ends, which stops fast players
+				if Door and Door:GetAttribute("Opened") == true then
+					for _, Part in Door:GetDescendants() do
+						if Part:IsA("BasePart") and Part.CanCollide then Part.CanCollide = false end
+					end
+				end
+			end
+		end)
+
 		Util.Guard("frame movers", function()
 		if Toggles.VelocityManipulationSwitch.Value then
 			Ctx.VelBody.Parent = RootPart
@@ -5520,7 +5536,9 @@ local LeverMaxPulls, LeverGap = 6, 1.5
 Util.LeverRec = function(Prompt)
 	local Rec = Ctx.Levers[Prompt]
 	if not Rec then
-		Rec = { Own = 0, Total = 0, At = 0, Before = nil, Blind = false }
+		local First = Prompt:GetAttribute("Interactions")
+		Rec = { Own = 0, Total = 0, At = 0, Before = nil, Blind = false, Base = type(First) == "number" and First or 0 }
+		warn("[DiamondHub] track lever found, Interactions=" .. tostring(First) .. ", enabled=" .. tostring(Prompt.Enabled))
 		Ctx.Levers[Prompt] = Rec
 	end
 	return Rec
@@ -5533,7 +5551,8 @@ Util.LeverNeedsPull = function(Prompt)
 	if Rec.Before ~= nil and not Rec.Blind and Attr == Rec.Before then
 		Rec.Blind = true -- the attribute never moved after our pull, stop trusting it
 	end
-	local Count = (type(Attr) == "number" and not Rec.Blind) and Attr or Rec.Own
+	-- only the change since we first saw the lever counts, whatever value the game starts it on
+	local Count = (type(Attr) == "number" and not Rec.Blind) and (Attr - Rec.Base) or Rec.Own
 	return Count % 2 == 0
 end
 Util.LeverPulled = function(Prompt)
