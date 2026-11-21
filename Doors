@@ -1566,12 +1566,8 @@ end)
 Boxes.Autos:AddToggle("AutoHeartbeatSolver", { Text = "Heartbeat Solver", Default = false, Tooltip = "Blocks the heartbeat minigame from reporting a miss, so Figure never catches you.", Disabled = not Util.Supports({"hookmetamethod", "newcclosure", "getnamecallmethod"}), DisabledTooltip = Ctx.NoSupportMsg })
 Boxes.Autos:AddToggle("AutoEggGame", {
 	Text = "Auto Egg Game", Default = false,
-	Tooltip = "In the egg minigame (Charles): catches good eggs, smashes rotten ones, and ends the run once the chosen number of rounds is won. The game itself never stops on its own.",
+	Tooltip = "In the egg minigame (Charles): catches good eggs, smashes rotten ones, and ends the run once round 3 is won. The game itself never stops on its own.",
 	Disabled = not Util.Supports({"require"}), DisabledTooltip = Ctx.NoSupportMsg
-})
-Boxes.Autos:AddSlider("AutoEggRounds", {
-	Text = "Egg Rounds To Win", Min = 3, Max = 30, Default = 3, Rounding = 0, Compact = true,
-	Tooltip = "Rounds to win before the run is ended. 3 is the round the game counts as a win."
 })
 do
 	local Loop
@@ -1603,7 +1599,7 @@ do
 					end
 					-- the game is endless by design: once enough rounds are won, finish the run
 					-- the same way a lost run ends (GameOver -> leaderboard). Round 4+ means no jumpscare.
-					if Core.state == "Playing" and type(Core.round) == "number" and Core.round > Options.AutoEggRounds.Value then
+					if Core.state == "Playing" and type(Core.round) == "number" and Core.round > 3 then
 						pcall(function() Core:_GameOver() end)
 					end
 				end
