@@ -636,126 +636,118 @@ if not Library.Scheme then
 	})
 end
 
+local NOTE_W, NOTE_H, NOTE_STEP = 310, 58, 66
+local NOTE_REST, NOTE_HIDDEN = -(NOTE_W + 14), 14
+
 function NotificationLibrary:Notify(TitleText, Desc, Delay)
 	task.spawn(function()
-		local Notification = Instance.new("Frame")
-		local Line = Instance.new("Frame")
-		local Warning = Instance.new("ImageLabel")
-		local UICorner = Instance.new("UICorner")
-		local UICorner2 = Instance.new("UICorner")
-		local Title = Instance.new("TextLabel")
-		local Description = Instance.new("TextLabel")
+		Delay = Delay or 5
+		local Slot = NotificationLibrary.LiveNotifications
+		local Card = Instance.new("Frame")
+		Card.Name = "Notification"
+		Card.Parent = Container
+		Card.BackgroundColor3 = Library.Scheme.BackgroundColor
+		Card.BackgroundTransparency = 0.15
+		Card.BorderSizePixel = 0
+		Card.ClipsDescendants = true
+		Card.Size = UDim2.fromOffset(NOTE_W, NOTE_H)
+		Card.Position = UDim2.new(1, NOTE_HIDDEN, 1, -(NOTE_H + 20) - NOTE_STEP * Slot)
+		Card:SetAttribute("ID", NotificationLibrary.Notifications)
+		Card:SetAttribute("CurrentPosition", Card.Position)
 
-		Notification.Name = "Notification"
-		Notification.Parent = Container
-		Notification.BackgroundColor3 = Library.Scheme.BackgroundColor
-		Notification.BackgroundTransparency = 0.4
-		Notification.BorderSizePixel = 0
-		Notification.Position = UDim2.new(1, 5, 0, 60 + (60 * NotificationLibrary.LiveNotifications))
-		Notification.Size = UDim2.new(0, 420, 0, 50)
-		Notification:SetAttribute("ID", NotificationLibrary.Notifications)
-		Notification:SetAttribute("CurrentPosition", Notification.Position)
+		local Round = Instance.new("UICorner")
+		Round.CornerRadius = UDim.new(0, 8)
+		Round.Parent = Card
+		local Edge = Instance.new("UIStroke")
+		Edge.Color = Library.Scheme.AccentColor
+		Edge.Transparency = 0.6
+		Edge.Thickness = 1
+		Edge.Parent = Card
 
-		Line.Name = "Line"
-		Line.Parent = Notification
-		Line.BackgroundColor3 = Library.Scheme.AccentColor
-		Line.BorderSizePixel = 0
-		Line.Position = UDim2.new(0, 0, 1, -3)
-		Line.Size = UDim2.new(0, 0, 0, 3)
+		local Stripe = Instance.new("Frame")
+		Stripe.Name = "Stripe"
+		Stripe.BackgroundColor3 = Library.Scheme.AccentColor
+		Stripe.BorderSizePixel = 0
+		Stripe.Size = UDim2.new(0, 4, 1, 0)
+		Stripe.Parent = Card
 
-		Warning.Name = "Warning"
-		Warning.Parent = Notification
-		Warning.BackgroundTransparency = 1
-		Warning.Position = UDim2.new(0, 10, 0, 5)
-		Warning.Size = UDim2.new(0, 40, 0, 40)
-		Warning.Image = "rbxassetid://3944668821"
-		Warning.ImageColor3 = Library.Scheme.AccentColor
-		Warning.ScaleType = Enum.ScaleType.Fit
+		local Heading = Instance.new("TextLabel")
+		Heading.Name = "Title"
+		Heading.BackgroundTransparency = 1
+		Heading.Position = UDim2.fromOffset(16, 7)
+		Heading.Size = UDim2.new(1, -26, 0, 16)
+		Heading.Font = Enum.Font.GothamBold
+		Heading.Text = TitleText or "..."
+		Heading.TextColor3 = Library.Scheme.AccentColor
+		Heading.TextSize = 13
+		Heading.TextTruncate = Enum.TextTruncate.AtEnd
+		Heading.TextXAlignment = Enum.TextXAlignment.Left
+		Heading.Parent = Card
 
-		UICorner.CornerRadius = UDim.new(0, 20)
-		UICorner.Parent = Warning
+		local Body = Instance.new("TextLabel")
+		Body.Name = "Description"
+		Body.BackgroundTransparency = 1
+		Body.Position = UDim2.fromOffset(16, 25)
+		Body.Size = UDim2.new(1, -26, 0, 26)
+		Body.Font = Enum.Font.Gotham
+		Body.Text = Desc or "..."
+		Body.TextColor3 = Library.Scheme.FontColor
+		Body.TextTransparency = 0.15
+		Body.TextSize = 12
+		Body.TextWrapped = true
+		Body.TextXAlignment = Enum.TextXAlignment.Left
+		Body.TextYAlignment = Enum.TextYAlignment.Top
+		Body.Parent = Card
 
-		UICorner2.CornerRadius = UDim.new(0, 4)
-		UICorner2.Parent = Notification
-
-		Title.Name = "Title"
-		Title.Parent = Notification
-		Title.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-		Title.BackgroundTransparency = 1
-		Title.Position = UDim2.new(0, 60, 0.155, 0)
-		Title.Size = UDim2.new(0, 205, 0, 15)
-		Title.Text = TitleText or "..."
-		Title.TextColor3 = Library.Scheme.FontColor
-		Title.TextSize = 10
-		Title.TextStrokeTransparency = 0.75
-		Title.TextXAlignment = Enum.TextXAlignment.Left
-
-		Description.Name = "Description"
-		Description.Parent = Notification
-		Description.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-		Description.BackgroundTransparency = 1
-		Description.Position = UDim2.new(0, 60, 0.483, 0)
-		Description.Size = UDim2.new(0, 205, 0, 18)
-		Description.Text = Desc or "..."
-		Description.TextColor3 = Library.Scheme.FontColor
-		Description.TextTransparency = 0.1
-		Description.TextSize = 10
-		Description.TextStrokeTransparency = 0.75
-		Description.TextXAlignment = Enum.TextXAlignment.Left
+		local Timer = Instance.new("Frame")
+		Timer.Name = "Line"
+		Timer.BackgroundColor3 = Library.Scheme.AccentColor
+		Timer.BackgroundTransparency = 0.3
+		Timer.BorderSizePixel = 0
+		Timer.AnchorPoint = Vector2.new(0, 1)
+		Timer.Position = UDim2.new(0, 4, 1, 0)
+		Timer.Size = UDim2.new(1, -4, 0, 2)
+		Timer.Parent = Card
 
 		NotificationLibrary.LiveNotifications += 1
 		NotificationLibrary.Notifications += 1
 
-		Services.TweenService:Create(
-			Notification,
-			TweenInfo.new(1, Enum.EasingStyle.Exponential),
-			{ Position = UDim2.new(1, -370, 0, Notification.Position.Y.Offset) }
-		):Play()
+		Services.TweenService:Create(Card, TweenInfo.new(0.5, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+			{ Position = UDim2.new(1, NOTE_REST, 1, -(NOTE_H + 20) - NOTE_STEP * Slot) }):Play()
+		Card:SetAttribute("CurrentPosition", UDim2.new(1, NOTE_REST, 1, -(NOTE_H + 20) - NOTE_STEP * Slot))
 
 		task.wait(0.25)
 		if typeof(Delay) == "Instance" then
 			Delay.Destroying:Wait()
 		else
-			Services.TweenService:Create(
-				Line,
-				TweenInfo.new(Delay - 0.25, Enum.EasingStyle.Linear),
-				{ Size = UDim2.new(0, 400, 0, 3) }
-			):Play()
+			Services.TweenService:Create(Timer, TweenInfo.new(Delay - 0.25, Enum.EasingStyle.Linear),
+				{ Size = UDim2.new(0, 0, 0, 2) }):Play()
 			task.wait(Delay - 0.25)
 		end
 
-		Notification:SetAttribute("Destroying", true)
-
-		Services.TweenService:Create(
-			Notification,
-			TweenInfo.new(0.75, Enum.EasingStyle.Exponential, Enum.EasingDirection.In),
-			{ Position = UDim2.new(1, 5, 0, Notification.Position.Y.Offset) }
-		):Play()
+		Card:SetAttribute("Destroying", true)
+		local Rest = Card:GetAttribute("CurrentPosition")
+		Services.TweenService:Create(Card, TweenInfo.new(0.4, Enum.EasingStyle.Quint, Enum.EasingDirection.In),
+			{ Position = UDim2.new(1, NOTE_HIDDEN, Rest.Y.Scale, Rest.Y.Offset) }):Play()
 
 		NotificationLibrary.LiveNotifications -= 1
 
-		local NotifId = Notification:GetAttribute("ID")
-		local NotifY = Notification:GetAttribute("CurrentPosition").Y.Offset
-
-		for _, Object in Container:GetChildren() do
-			if Object.Name == "Notification"
-				and Object:GetAttribute("ID")
-				and Object:GetAttribute("ID") > NotifId
-				and Object:GetAttribute("Destroying") ~= true
-				and Object.Position.Y.Offset ~= 60
+		-- newer cards (above in the stack) drop down into the freed slot
+		local MyId = Card:GetAttribute("ID")
+		for _, Other in Container:GetChildren() do
+			if Other.Name == "Notification" and Other ~= Card
+				and (Other:GetAttribute("ID") or 0) > MyId
+				and Other:GetAttribute("Destroying") ~= true
 			then
-				local NewY = Object:GetAttribute("CurrentPosition").Y.Offset - 60
-				Object:SetAttribute("CurrentPosition", UDim2.new(1, -450, 0, NewY))
-				Services.TweenService:Create(
-					Object,
-					TweenInfo.new(1, Enum.EasingStyle.Exponential, Enum.EasingDirection.InOut),
-					{ Position = UDim2.new(1, -370, 0, NewY) }
-				):Play()
+				local Pos = Other:GetAttribute("CurrentPosition")
+				local Down = UDim2.new(Pos.X.Scale, Pos.X.Offset, Pos.Y.Scale, Pos.Y.Offset + NOTE_STEP)
+				Other:SetAttribute("CurrentPosition", Down)
+				Services.TweenService:Create(Other, TweenInfo.new(0.4, Enum.EasingStyle.Quint), { Position = Down }):Play()
 			end
 		end
 
-		task.wait(0.75)
-		Notification:Destroy()
+		task.wait(0.45)
+		Card:Destroy()
 	end)
 end
 
@@ -763,7 +755,7 @@ Util.Alert = function(Settings)
 	local HiddenContainer = SafeParent()
 
 	if not Settings.Body then
-		Settings.Body = "..."
+		Settings.Body = ""
 	end
 
 	local Sound = Instance.new("Sound", HiddenContainer)
