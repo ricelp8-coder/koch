@@ -1093,43 +1093,79 @@ function GU.vim()
 end
 function GU.fireSignal(sig)
     if type(firesignal) == "function" and pcall(firesignal, sig) then return true end
-    if type(getconnections) == "function" then
-        local ok, cs = pcall(getconnections, sig)
-        if ok and type(cs) == "table" then
-            local any = false
-            for _, c in ipairs(cs) do
-                if pcall(function() c:Fire() end) then any = true end
+    if type(getconnections) ~= "function" then return false end
+    local ok, cs = pcall(getconnections, sig)
+    if not (ok and type(cs) == "table") or #cs == 0 then return false end
+    local any = false
+    for _, c in ipairs(cs) do
+        if pcall(function() c:Fire() end) then
+            any = true
+        else
+            -- executors without Connection:Fire still expose the handler itself
+            local okf, f = pcall(function() return c.Function end)
+            if okf and type(f) == "function" then
+                task.spawn(f)
+                any = true
             end
-            return any
         end
     end
-    return false
+    return any
+end
+local UIS = game:GetService("UserInputService")
+-- moves the mouse until the engine reports it at (x, y) in GetMouseLocation space; this absorbs the top bar inset
+-- and the pixel scale of phones, where the injected coordinates and the game's coordinates differ
+function GU.mouseTo(x, y)
+    local v = GU.vim()
+    local mx, my, gx, gy = x, y, 1, 1
+    local last
+    for _ = 1, 8 do
+        local sent = false
+        if v then sent = pcall(function() v:SendMouseMoveEvent(mx, my, game) end) end
+        if not sent and type(mousemoveabs) == "function" then sent = pcall(mousemoveabs, mx, my) end
+        if not sent then return nil end
+        task.wait()
+        task.wait()
+        local loc = UIS:GetMouseLocation()
+        local ex, ey = x - loc.X, y - loc.Y
+        if math.abs(ex) <= 1.5 and math.abs(ey) <= 1.5 then return mx, my end
+        if last then
+            local dmx, dmy = mx - last.mx, my - last.my
+            local dlx, dly = loc.X - last.lx, loc.Y - last.ly
+            if (math.abs(dmx) > 2 or math.abs(dmy) > 2) and math.abs(dlx) < 0.5 and math.abs(dly) < 0.5 then
+                return x, y -- the engine does not report the injected mouse: no feedback, use the plain point
+            end
+            if math.abs(dmx) > 2 and math.abs(dlx) > 0.5 then gx = math.clamp(dlx / dmx, 0.2, 5) end
+            if math.abs(dmy) > 2 and math.abs(dly) > 0.5 then gy = math.clamp(dly / dmy, 0.2, 5) end
+        end
+        last = {mx = mx, my = my, lx = loc.X, ly = loc.Y}
+        mx, my = mx + ex / gx, my + ey / gy
+    end
+    return mx, my
 end
 function GU.clickAt(x, y)
+    local mx, my = GU.mouseTo(x, y)
+    if not mx then return false end
     local v = GU.vim()
-    if v then
-        local ok = pcall(function()
-            v:SendMouseMoveEvent(x, y, game)
-            task.wait()
-            v:SendMouseButtonEvent(x, y, 0, true, game, 0)
-            task.wait()
-            v:SendMouseButtonEvent(x, y, 0, false, game, 0)
-        end)
-        if ok then return true end
-    end
-    if type(mousemoveabs) == "function" and type(mouse1click) == "function" then
-        pcall(mousemoveabs, x, y)
+    if v and pcall(function()
+        v:SendMouseButtonEvent(mx, my, 0, true, game, 0)
         task.wait()
-        return (pcall(mouse1click))
+        v:SendMouseButtonEvent(mx, my, 0, false, game, 0)
+    end) then
+        return true
     end
+    if type(mouse1click) == "function" then return (pcall(mouse1click)) end
     return false
+end
+function GU.screenOf(gui)
+    local sg = gui:FindFirstAncestorWhichIsA("ScreenGui")
+    local inset = (sg and sg.IgnoreGuiInset) and Vector2.zero or game:GetService("GuiService"):GetGuiInset()
+    return gui.AbsolutePosition + gui.AbsoluteSize / 2 + inset
 end
 function GU.press(btn)
     if not (typeof(btn) == "Instance" and btn:IsA("GuiButton")) then return false end
     if GU.fireSignal(btn.Activated) then return true end
-    local gui = btn:FindFirstAncestorWhichIsA("ScreenGui")
-    local inset = (gui and gui.IgnoreGuiInset) and Vector2.zero or game:GetService("GuiService"):GetGuiInset()
-    local c = btn.AbsolutePosition + btn.AbsoluteSize / 2 + inset
+    if not visible(btn) then return false end
+    local c = GU.screenOf(btn)
     return GU.clickAt(c.X, c.Y)
 end
 function GU.vote(mode)
@@ -1182,11 +1218,19 @@ function GU.ownGuis(on, saved)
         return nil
     end
     local out = {}
+    local roots = {pg}
+    pcall(function() roots[#roots + 1] = game:GetService("CoreGui") end)
+    if type(gethui) == "function" then pcall(function() roots[#roots + 1] = gethui() end) end
     local lib = UI and UI.Library
-    local g = lib and lib.ScreenGui
-    if typeof(g) == "Instance" and g:IsA("ScreenGui") and g.Enabled then
-        g.Enabled = false
-        out[g] = true
+    for _, root in ipairs(roots) do
+        pcall(function()
+            for _, g in ipairs(root:GetChildren()) do
+                if g:IsA("ScreenGui") and g.Enabled and (g == (lib and lib.ScreenGui) or UI.IsOwnGui(g)) then
+                    g.Enabled = false
+                    out[g] = true
+                end
+            end
+        end)
     end
     return out
 end
@@ -1208,7 +1252,8 @@ function GU.slotOf(name)
     end
     return nil
 end
--- placement the way a player does it: pick the hotbar slot, then click the spot (camera looks straight down at it)
+-- placement the way a player does it: pick the hotbar slot, then click the spot. The camera is held straight above
+-- the spot for the whole step, so the player's own camera angle and zoom do not matter
 function GU.place(name, pos)
     local i = GU.slotOf(name)
     local btn = i and path(pg, "MainFrames/TroopsSelector/Troops/Troop" .. i .. "/InteractiveButton")
@@ -1217,6 +1262,14 @@ function GU.place(name, pos)
     local pl = fw and fw.Placement
     local cam = workspace.CurrentCamera
     local saveType, saveCf = cam.CameraType, cam.CFrame
+    local hold = CFrame.lookAt(pos + Vector3.new(0, 40, 0.05), pos)
+    local RunS = game:GetService("RunService")
+    local bound = pcall(function()
+        RunS:BindToRenderStep("ld_place_cam", Enum.RenderPriority.Camera.Value + 10, function()
+            cam.CameraType = Enum.CameraType.Scriptable
+            cam.CFrame = hold
+        end)
+    end)
     local hidden = GU.ownGuis(false)
     local started = false
     local conn
@@ -1225,20 +1278,21 @@ function GU.place(name, pos)
     end
     local ok, err = pcall(function()
         cam.CameraType = Enum.CameraType.Scriptable
-        cam.CFrame = CFrame.lookAt(pos + Vector3.new(0, 40, 0.05), pos)
+        cam.CFrame = hold
+        task.wait()
         task.wait()
         if not GU.press(btn) then error("slot press failed", 0) end
         local t0 = os.clock()
         while not started and os.clock() - t0 < 0.6 do task.wait() end
-        cam.CFrame = CFrame.lookAt(pos + Vector3.new(0, 40, 0.05), pos)
         local sp = cam:WorldToViewportPoint(pos)
-        local v = GU.vim()
-        if v then pcall(function() v:SendMouseMoveEvent(sp.X, sp.Y, game) end) end
-        task.wait(0.08)
+        if not GU.mouseTo(sp.X, sp.Y) then error("no mouse input in this executor", 0) end
+        task.wait(0.06)
+        sp = cam:WorldToViewportPoint(pos)
         if not GU.clickAt(sp.X, sp.Y) then error("no mouse input in this executor", 0) end
         task.wait(0.05)
     end)
     if conn then pcall(function() conn:Disconnect() end) end
+    if bound then pcall(function() RunS:UnbindFromRenderStep("ld_place_cam") end) end
     pcall(function()
         cam.CameraType = saveType
         cam.CFrame = saveCf
@@ -2365,7 +2419,9 @@ function MT.ended(stat)
 end
 function MT.finishOpen()
     local f = path(pg, "Match/MatchFinish")
-    return f ~= nil and visible(f)
+    if not (f and f:IsA("GuiObject") and f.Visible) then return false end
+    local fr = f:FindFirstChild("MatchFinishFrame")
+    return fr == nil or not fr:IsA("GuiObject") or fr.Visible
 end
 
 local END = {tp = false, tpAt = 0, sent = 0, nextAt = 0, since = 0, active = false}
@@ -2918,6 +2974,12 @@ local function saveMacro()
     if n == "" then
         flash("Enter a macro name first", "Warning")
         return
+    end
+    if mc.rec then
+        -- saving ends the recording, otherwise later actions would keep landing in a macro that is already saved
+        mc.rec = false
+        MT.clearStamps()
+        syncToggles()
     end
     if #mc.steps == 0 then
         flash("Nothing to save: record a macro first", "Warning")
