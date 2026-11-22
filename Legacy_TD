@@ -972,38 +972,78 @@ local function money()
 end
 
 local FW = {mod = nil, loading = false, retryAt = 0, replica = nil, rLoading = false}
-function FW.gameLoaded(m)
-    if type(getloadedmodules) ~= "function" then return nil end
-    local ok, list = pcall(getloadedmodules)
-    if not ok or type(list) ~= "table" then return nil end
-    for _, x in ipairs(list) do
-        if x == m then return true end
+function FW.isFw(t)
+    if type(t) ~= "table" then return false end
+    local ok, r = pcall(function()
+        return type(rawget(t, "Network") or t.Network) == "table" and type(rawget(t, "Placement") or t.Placement) == "table"
+    end)
+    return ok and r == true
+end
+-- the game's own MultiboxFramework table, taken from its scripts' upvalues; require() is never called
+function FW.find()
+    local gu = (type(debug) == "table" and debug.getupvalues) or getupvalues
+    local fns = {}
+    local function add(f) if type(f) == "function" then fns[#fns + 1] = f end end
+    if type(getconnections) == "function" then
+        for _, bp in ipairs({"Match/TopFrame/SkipWave", "Match/InspectMenu/SellButton", "Match/InspectMenu/Upgrade/UpgradeButton",
+            "MainFrames/TroopsSelector/Troops/Troop1/InteractiveButton"}) do
+            local b = path(pg, bp)
+            if b and b:IsA("GuiButton") then
+                local ok, cs = pcall(getconnections, b.Activated)
+                if ok and type(cs) == "table" then
+                    for _, c in ipairs(cs) do
+                        local okf, f = pcall(function() return c.Function end)
+                        if okf then add(f) end
+                    end
+                end
+            end
+        end
     end
-    return false
+    if type(getsenv) == "function" then
+        for _, sp in ipairs({"Match/TopFrame/WaveStatusHandler", "MainFrames/TroopsSelector/SelectorHandler",
+            "Match/InspectMenu/InspectMenuHandler", "VotingFrame/VoteFrame/VoteHandler"}) do
+            local sc = path(pg, sp)
+            if sc then
+                local ok, env = pcall(getsenv, sc)
+                if ok and type(env) == "table" then
+                    for _, k in ipairs({"Rerender", "Changed", "Close", "FindNum"}) do add(rawget(env, k)) end
+                end
+            end
+        end
+    end
+    if type(gu) == "function" then
+        for _, f in ipairs(fns) do
+            local ok, ups = pcall(gu, f)
+            if ok and type(ups) == "table" then
+                for _, v in pairs(ups) do
+                    if FW.isFw(v) then return v end
+                end
+            end
+        end
+    end
+    if type(getgc) == "function" then
+        local ok, list = pcall(getgc, true)
+        if ok and type(list) == "table" then
+            for _, v in ipairs(list) do
+                if type(v) == "table" and type(rawget(v, "Network")) == "table" and type(rawget(v, "Placement")) == "table" then
+                    return v
+                end
+            end
+        end
+    end
+    return nil
 end
 function FW.load()
     if FW.mod or FW.loading or os.clock() < FW.retryAt then return end
     FW.loading = true
     task.spawn(function()
-        local ok, mod = pcall(function()
-            local m = RS:WaitForChild("MultiboxFramework", 30)
-            if not m then return nil end
-            local t0 = os.clock()
-            while alive() do
-                local loaded = FW.gameLoaded(m)
-                local waited = os.clock() - t0
-                if loaded == true or waited >= 40 or (loaded == nil and waited >= 10) then break end
-                task.wait(0.25)
-            end
-            if not alive() then return nil end
-            return require(m)
-        end)
+        local ok, mod = pcall(FW.find)
         if ok and type(mod) == "table" then
             local t0 = os.clock()
             while alive() and not mod.Loaded and os.clock() - t0 < 60 do task.wait(0.2) end
             if mod.Loaded then FW.mod = mod end
         end
-        if not FW.mod then FW.retryAt = os.clock() + 10 end
+        if not FW.mod then FW.retryAt = os.clock() + 3 end
         FW.loading = false
     end)
 end
@@ -1044,11 +1084,187 @@ function FW.shared(name)
     if ok and type(v) == "table" then return v end
     return nil
 end
+local TW = {}
+-- match actions go through the game's own buttons: the game's handler sends the request, the hub never calls Network itself
+local GU = {lobbyPressed = false}
+function GU.vim()
+    local ok, v = pcall(function() return game:GetService("VirtualInputManager") end)
+    return ok and v or nil
+end
+function GU.fireSignal(sig)
+    if type(firesignal) == "function" and pcall(firesignal, sig) then return true end
+    if type(getconnections) == "function" then
+        local ok, cs = pcall(getconnections, sig)
+        if ok and type(cs) == "table" then
+            local any = false
+            for _, c in ipairs(cs) do
+                if pcall(function() c:Fire() end) then any = true end
+            end
+            return any
+        end
+    end
+    return false
+end
+function GU.clickAt(x, y)
+    local v = GU.vim()
+    if v then
+        local ok = pcall(function()
+            v:SendMouseMoveEvent(x, y, game)
+            task.wait()
+            v:SendMouseButtonEvent(x, y, 0, true, game, 0)
+            task.wait()
+            v:SendMouseButtonEvent(x, y, 0, false, game, 0)
+        end)
+        if ok then return true end
+    end
+    if type(mousemoveabs) == "function" and type(mouse1click) == "function" then
+        pcall(mousemoveabs, x, y)
+        task.wait()
+        return (pcall(mouse1click))
+    end
+    return false
+end
+function GU.press(btn)
+    if not (typeof(btn) == "Instance" and btn:IsA("GuiButton")) then return false end
+    if GU.fireSignal(btn.Activated) then return true end
+    local gui = btn:FindFirstAncestorWhichIsA("ScreenGui")
+    local inset = (gui and gui.IgnoreGuiInset) and Vector2.zero or game:GetService("GuiService"):GetGuiInset()
+    local c = btn.AbsolutePosition + btn.AbsoluteSize / 2 + inset
+    return GU.clickAt(c.X, c.Y)
+end
+function GU.vote(mode)
+    local b = path(pg, "VotingFrame/VoteFrame/VoteMainFrame/MainFrame/" .. tostring(mode) .. "/Vote/Vote")
+    return GU.press(b)
+end
+function GU.skip()
+    return GU.press(path(pg, "Match/TopFrame/SkipWave"))
+end
+function GU.inspect(m)
+    local fw = FW.get()
+    local pl = fw and fw.Placement
+    if not (pl and typeof(m) == "Instance" and m.Parent) then return false end
+    if pl.InspectingTroop == m and pl.InspectMenuIsOpen then return true end
+    local sig = pl.OpenInspectMenu
+    if not (sig and pcall(function() sig:Fire(m) end)) then return false end
+    local t0 = os.clock()
+    while os.clock() - t0 < 1 do
+        if pl.InspectingTroop == m then return true end
+        task.wait()
+    end
+    return pl.InspectingTroop == m
+end
+local TOWER_BTN = {
+    UpgradeTroop = "Match/InspectMenu/Upgrade/UpgradeButton",
+    SellTroop = "Match/InspectMenu/SellButton",
+    ChangeTargetting = "Match/InspectMenu/Targetting/TargettingButton",
+}
+function GU.tower(ev, m)
+    if not GU.inspect(m) then return false end
+    return GU.press(path(pg, TOWER_BTN[ev]))
+end
+function GU.toLobby()
+    local b = path(pg, "Match/MatchFinish/MatchFinishFrame/EndOptions/ReturnToLobby/ButtonFrame/ReturnToLobbyButton")
+    if not b then return false end
+    -- the button toggles: a second press cancels, so a retry presses twice (cancel, then send again)
+    if GU.lobbyPressed then
+        GU.press(b)
+        task.wait(0.35)
+    end
+    GU.lobbyPressed = GU.press(b)
+    return GU.lobbyPressed
+end
+function GU.playAgain()
+    return GU.press(path(pg, "Match/MatchFinish/MatchFinishFrame/EndOptions/PlayAgain/ButtonFrame/PlayAgainButton"))
+end
+function GU.ownGuis(on, saved)
+    if on then
+        for g in pairs(saved or {}) do pcall(function() g.Enabled = true end) end
+        return nil
+    end
+    local out = {}
+    local lib = UI and UI.Library
+    local g = lib and lib.ScreenGui
+    if typeof(g) == "Instance" and g:IsA("ScreenGui") and g.Enabled then
+        g.Enabled = false
+        out[g] = true
+    end
+    return out
+end
+function GU.slotOf(name)
+    local data = FW.data()
+    local eq = data and data.EquippedTroops
+    if type(eq) == "table" then
+        for i = 1, 5 do
+            if eq[i] == name then return i end
+        end
+    end
+    local d = TW.def(name)
+    local icon = d and d.Icon
+    if icon then
+        for i = 1, 5 do
+            local ic = path(pg, "MainFrames/TroopsSelector/Troops/Troop" .. i .. "/TroopIcon")
+            if ic and ic.Image == icon then return i end
+        end
+    end
+    return nil
+end
+-- placement the way a player does it: pick the hotbar slot, then click the spot (camera looks straight down at it)
+function GU.place(name, pos)
+    local i = GU.slotOf(name)
+    local btn = i and path(pg, "MainFrames/TroopsSelector/Troops/Troop" .. i .. "/InteractiveButton")
+    if not btn then return false, "not in hotbar" end
+    local fw = FW.get()
+    local pl = fw and fw.Placement
+    local cam = workspace.CurrentCamera
+    local saveType, saveCf = cam.CameraType, cam.CFrame
+    local hidden = GU.ownGuis(false)
+    local started = false
+    local conn
+    if pl and pl.PlacementStarted then
+        pcall(function() conn = pl.PlacementStarted:Connect(function() started = true end) end)
+    end
+    local ok, err = pcall(function()
+        cam.CameraType = Enum.CameraType.Scriptable
+        cam.CFrame = CFrame.lookAt(pos + Vector3.new(0, 40, 0.05), pos)
+        task.wait()
+        if not GU.press(btn) then error("slot press failed", 0) end
+        local t0 = os.clock()
+        while not started and os.clock() - t0 < 0.6 do task.wait() end
+        cam.CFrame = CFrame.lookAt(pos + Vector3.new(0, 40, 0.05), pos)
+        local sp = cam:WorldToViewportPoint(pos)
+        local v = GU.vim()
+        if v then pcall(function() v:SendMouseMoveEvent(sp.X, sp.Y, game) end) end
+        task.wait(0.08)
+        if not GU.clickAt(sp.X, sp.Y) then error("no mouse input in this executor", 0) end
+        task.wait(0.05)
+    end)
+    if conn then pcall(function() conn:Disconnect() end) end
+    pcall(function()
+        cam.CameraType = saveType
+        cam.CFrame = saveCf
+    end)
+    GU.ownGuis(true, hidden)
+    return ok, err
+end
+function GU.stopPlacing()
+    local fw = FW.get()
+    local pl = fw and fw.Placement
+    if pl and type(pl.Stop) == "function" then pcall(pl.Stop) end
+end
+function GU.route(ev, a)
+    if ev == "VoteMap" then return GU.vote(a) end
+    if ev == "VoteSkipWave" then return GU.skip() end
+    if TOWER_BTN[ev] then return GU.tower(ev, a) end
+    if ev == "TeleportToLobby" then return GU.toLobby() end
+    if ev == "PlayMatchAgain" then return GU.playAgain() end
+    return nil
+end
 function FW.fire(ev, ...)
+    local r = GU.route(ev, ...)
+    if r ~= nil then return r end
     local n = FW.net()
     if not n then return false end
-    local f = FW.origFire or n.Fire
-    return (pcall(f, ev, ...))
+    return (pcall(n.Fire, ev, ...))
 end
 function FW.invoke(ev, ...)
     local n = FW.net()
@@ -1059,7 +1275,6 @@ function FW.invoke(ev, ...)
     return res == nil and true or res
 end
 
-local TW = {}
 function TW.folder() return workspace:FindFirstChild("Troops") end
 function TW.owner(m)
     local o = m:FindFirstChild("TroopOwner")
@@ -2115,25 +2330,6 @@ local function syncToggles()
     if recToggle then recToggle:Set(mc.rec, true) end
     if playToggle then playToggle:Set(mc.play, true) end
 end
-local function takeStamp(kind, match)
-    local list = mc.stamps[kind]
-    local now = os.clock()
-    for i = #list, 1, -1 do
-        if now - list[i].ts > 10 then table.remove(list, i) end
-    end
-    local pickI, pickD
-    for i = #list, 1, -1 do
-        local ok, d = match(list[i])
-        if ok and (not pickD or d < pickD - 1e-6) then pickI, pickD = i, d end
-    end
-    if not pickI then return nil end
-    local picked = table.remove(list, pickI)
-    for i = #list, 1, -1 do
-        local ok, d = match(list[i])
-        if ok and d <= pickD + 1e-6 and list[i].ts <= picked.ts then table.remove(list, i) end
-    end
-    return picked
-end
 local function recordStep(kind, key, pos, stamp, extra)
     local s = {
         t = kind, k = key, p = {pos.X, pos.Y, pos.Z},
@@ -2148,243 +2344,30 @@ local function recordStep(kind, key, pos, stamp, extra)
     return s
 end
 local function a2v(a) return Vector3.new(a[1], a[2], a[3]) end
-local function a2cf(a)
-    if type(a) ~= "table" or #a ~= 12 then return nil end
-    local ok, v = pcall(function() return CFrame.new(table.unpack(a)) end)
-    if ok and typeof(v) == "CFrame" then return v end
-    return nil
-end
 local function recording() return mc.rec and not mc.playing end
-local function keyOf(inst)
-    local e = typeof(inst) == "Instance" and mc.reg[inst]
-    return e and e.key or nil
-end
 local MX = {}
 function MX.byKey(key)
     local pos = key and mc.k2pos[key]
     if not pos then return nil end
     return (TR.at(pos))
 end
-local function uidToTroop(uid)
-    local data = FW.data()
-    local t = data and data.Inventory and data.Inventory.Troops
-    if type(t) ~= "table" or type(uid) ~= "string" then return nil end
-    for tid, group in pairs(t) do
-        if type(group) == "table" and group[uid] ~= nil then return tid end
-    end
-    return nil
-end
-local function resolveUid(tid, saved)
-    local data = FW.data()
-    local group = data and data.Inventory and data.Inventory.Troops and data.Inventory.Troops[tid]
-    if type(group) ~= "table" then return saved end
-    local equipped = {}
-    for _, uid in pairs(type(data.EquippedTroopIds) == "table" and data.EquippedTroopIds or {}) do equipped[uid] = true end
-    local pick
-    for uid in pairs(group) do
-        if equipped[uid] and (not pick or uid < pick) then pick = uid end
-    end
-    if pick then return pick, true end
-    for uid in pairs(group) do
-        if not pick or uid < pick then pick = uid end
-    end
-    return pick or saved
-end
-local function encArg(v, depth)
-    depth = depth or 0
-    local t = typeof(v)
-    if t == "string" then
-        local tid = uidToTroop(v)
-        if tid then return {__uid = tid} end
-        return v
-    end
-    if t == "number" or t == "boolean" then return v end
-    if t == "Vector3" then return {__v3 = {v.X, v.Y, v.Z}} end
-    if t == "CFrame" then return {__cf = {v:GetComponents()}} end
-    if t == "Instance" then
-        local k = keyOf(v)
-        if k then return {__tw = k} end
-        local ok, full = pcall(function() return v:GetFullName() end)
-        if ok and type(full) == "string" then return {__path = full} end
-    end
-    if t == "table" and depth < 3 then
-        local entries = {}
-        for k, val in pairs(v) do
-            local kt = type(k)
-            if kt == "string" or kt == "number" or kt == "boolean" then
-                entries[#entries + 1] = {k, encArg(val, depth + 1)}
-            end
-        end
-        return {__tbl = entries}
-    end
-    return {__nil = true}
-end
-local function decArg(v)
-    if type(v) ~= "table" then return v end
-    if type(v.__v3) == "table" then return Vector3.new(v.__v3[1] or 0, v.__v3[2] or 0, v.__v3[3] or 0) end
-    if type(v.__cf) == "table" then return a2cf(v.__cf) end
-    if v.__tw ~= nil then return MX.byKey(v.__tw) end
-    if v.__uid ~= nil then return (resolveUid(v.__uid, v.__uid)) end
-    if type(v.__path) == "string" then
-        local o = game
-        for part in v.__path:gmatch("[^%.]+") do
-            if o == game then
-                local ok, svc = pcall(function() return game:GetService(part) end)
-                o = ok and svc or game:FindFirstChild(part)
-            else
-                o = o and o:FindFirstChild(part)
-            end
-        end
-        if o ~= game then return o end
-        return nil
-    end
-    if type(v.__tbl) == "table" then
-        local out = {}
-        for _, pair in ipairs(v.__tbl) do out[decArg(pair[1])] = decArg(pair[2]) end
-        return out
-    end
-    return nil
-end
-local function spatialOf(v, depth)
-    depth = depth or 0
-    local t = typeof(v)
-    if t == "Vector3" then return v end
-    if t == "CFrame" then return v.Position end
-    if t == "table" and depth < 3 then
-        for _, val in pairs(v) do
-            local r = spatialOf(val, depth + 1)
-            if r then return r end
-        end
-    end
-    return nil
-end
-local ACT_EVENTS = {UpgradeTroop = "Upgrade", SellTroop = "Sell", ChangeTargetting = "Target"}
-local IGNORE_EVENTS = {
-    VoteMap = true, PlayMatchAgain = true, CancelPlayAgain = true, TeleportToLobby = true, TeleportBackToMainLobby = true,
-    PlayerSettingChanged = true, ViewedUpdate = true, UseTimedBoost = true, RejoinMatch = true, CancelRejoinMatch = true,
-    TradingLoaded = true, StartTeleport = true, EquipBestTroops = true, UnequipAllTroops = true, ToggleEquipTroop = true,
-    Summon1 = true, Summon10 = true, Open1Crate = true, Open10Crate = true, SellTroops = true, ClaimQuestReward = true,
-    SignItem = true,
-}
-local function onNet(kind, ev, a, ...)
-    if type(ev) ~= "string" or not recording() then return end
-    mc.hookBeat = os.clock()
-    local now = os.clock()
-    local base = {ts = now, m = money(), w = mc.wave, wt = MT.waveTime()}
-    local stampKind = ACT_EVENTS[ev]
-    if stampKind then
-        if typeof(a) ~= "Instance" or not TW.mine(a) then return end
-        base.tower, base.pos = a, TW.pos(a)
-        local list = mc.stamps[stampKind]
-        if #list >= 48 then table.remove(list, 1) end
-        list[#list + 1] = base
-        return
-    end
-    if ev == "VoteSkipWave" then
-        if not MT.skipAvailable() then return end
-        for i = #mc.steps, 1, -1 do
-            local o = mc.steps[i]
-            if o.t == "skip" and o.w == mc.wave then return end
-        end
-        recordStep("skip", nil, Vector3.zero, base, {})
-        return
-    end
-    if IGNORE_EVENTS[ev] then return end
-    local rest = table.pack(a, ...)
-    local n = rest.n
-    while n > 0 and rest[n] == nil do n = n - 1 end
-    if typeof(a) == "Instance" and TW.mine(a) then
-        local e = mc.reg[a]
-        if not (e and e.key) then
-            if not mc.warnedField then
-                mc.warnedField = true
-                flash("Action on a unit that was not recorded (placed before Record): skipped", "Warning")
-            end
-            return
-        end
-        local args = {}
-        for i = 2, n do args[i - 1] = encArg(rest[i]) end
-        recordStep("act", e.key, e.pos, base, {n = e.name, ev = ev, nk = kind, a = args, an = math.max(n - 1, 0)})
-        return
-    end
-    local spatial
-    local tname
-    for i = 1, n do
-        spatial = spatial or spatialOf(rest[i])
-        if type(rest[i]) == "string" then
-            tname = tname or (TW.def(rest[i]) and rest[i]) or uidToTroop(rest[i])
-        end
-    end
-    if not (spatial or tname) then return end
-    local args = {}
-    for i = 1, n do args[i] = encArg(rest[i]) end
-    base.ev, base.nk, base.args, base.an, base.n, base.pos = ev, kind, args, n, tname, spatial
-    local list = mc.stamps.Place
-    if #list >= 48 then table.remove(list, 1) end
-    list[#list + 1] = base
-end
-local installDeepHook, useRaw
+-- recording watches the field (new unit, level, target, sold) and the skip votes; nothing is hooked
 mc.cb.place = function(m, e)
     if not recording() then return end
-    local stamp = takeStamp("Place", function(o)
-        if o.n and o.n ~= e.name then return false end
-        if os.clock() - o.ts > 8 then return false end
-        local d = os.clock() - o.ts
-        if o.pos then
-            local sd = xzDist(o.pos, e.pos)
-            if sd > 14 then return false end
-            d = sd + d * 0.01
-        end
-        return true, d
-    end)
-    if not stamp then
-        mc.hookMiss = true
-        local hs = genv.ld_net
-        if hs and hs.mode == "field" and not hs.escalated then
-            hs.escalated = true
-            if installDeepHook(hs) then
-                useRaw(hs)
-                flash("Switched to the deep hook: place that unit again", "Warning")
-                return
-            end
-        end
-        if not mc.warnedField then
-            mc.warnedField = true
-            flash("A placement was not captured by the hook: it is not in the macro", "Warning")
-        end
-        return
-    end
     mc.keyN = mc.keyN + 1
     e.key = "T" .. mc.keyN
-    recordStep("place", e.key, e.pos, stamp, {
-        n = e.name, c = TW.placePrice(e.name), ev = stamp.ev, nk = stamp.nk, a = stamp.args, an = stamp.an,
-    })
+    recordStep("place", e.key, e.pos, nil, {n = e.name, c = TW.placePrice(e.name)})
 end
 mc.cb.upgrade = function(m, e, old)
     if not (recording() and e.key) then return end
-    local stamp = takeStamp("Upgrade", function(o)
-        if o.tower == m then return true, 0 end
-        return false
-    end)
-    if not stamp then return end
-    recordStep("upgrade", e.key, e.pos, stamp, {n = e.name, lv = e.lv, c = TW.priceAt(e.name, e.lv)})
+    recordStep("upgrade", e.key, e.pos, nil, {n = e.name, lv = e.lv, c = TW.priceAt(e.name, e.lv)})
 end
 mc.cb.sell = function(m, e)
     if not (recording() and e.key) then return end
-    local stamp = takeStamp("Sell", function(o)
-        if o.tower == m then return true, 0 end
-        return false
-    end)
-    if not stamp then return end
-    recordStep("sell", e.key, e.pos, stamp, {n = e.name})
+    recordStep("sell", e.key, e.pos, nil, {n = e.name})
 end
 mc.cb.target = function(m, e)
     if not (recording() and e.key) then return end
-    local stamp = takeStamp("Target", function(o)
-        if o.tower == m then return true, 0 end
-        return false
-    end)
-    if not stamp then return end
     local mode = TW.target(m)
     if mode == nil then return end
     local last = mc.steps[#mc.steps]
@@ -2392,75 +2375,17 @@ mc.cb.target = function(m, e)
         last.mode = mode
         tgAt[last] = os.clock()
     else
-        local s = recordStep("target", e.key, e.pos, stamp, {n = e.name, mode = mode})
+        local s = recordStep("target", e.key, e.pos, nil, {n = e.name, mode = mode})
         tgAt[s] = os.clock()
     end
 end
-local function wrapNet(state, kind, getOrig)
-    return function(ev, ...)
-        local hub = state.hub
-        if hub and hub.mc.rec and not hub.mc.playing then pcall(hub.onNet, kind, ev, ...) end
-        return getOrig()(ev, ...)
+mc.cb.skip = function()
+    if not recording() then return end
+    for i = #mc.steps, 1, -1 do
+        local o = mc.steps[i]
+        if o.t == "skip" and o.w == mc.wave then return end
     end
-end
-useRaw = function(state)
-    FW.origFire, FW.origInvoke = state.rawFire, state.rawInvoke
-end
-installDeepHook = function(state)
-    if state.mode == "deep" then return true end
-    if type(hookfunction) ~= "function" then return false end
-    local net = state.net
-    if state.mode == "field" then
-        pcall(function()
-            if net.Fire == state.hookF then net.Fire = state.fire end
-            if state.hookI and net.Invoke == state.hookI then net.Invoke = state.invoke end
-        end)
-    end
-    local function hookOne(target, kind)
-        if type(target) ~= "function" then return nil end
-        local backup = type(clonefunction) == "function" and select(2, pcall(clonefunction, target)) or nil
-        local old
-        local ok, res = pcall(hookfunction, target, wrapNet(state, kind, function() return old end))
-        if not ok then return nil end
-        old = (type(res) == "function" and res ~= target and res) or (type(backup) == "function" and backup) or nil
-        return old
-    end
-    local oldF = hookOne(state.fire, "Fire")
-    if not oldF then return false end
-    local oldI = state.invoke
-    if type(state.invoke) == "function" and state.invoke ~= state.fire then
-        oldI = hookOne(state.invoke, "Invoke") or state.invoke
-    end
-    state.mode, state.rawFire, state.rawInvoke = "deep", oldF, oldI
-    return true
-end
-local function installHook()
-    local net = FW.net()
-    if not net or type(net.Fire) ~= "function" then return false end
-    local state = genv.ld_net
-    if not (state and state.net == net) then
-        state = {net = net, mode = nil, fire = net.Fire, invoke = net.Invoke}
-        state.rawFire, state.rawInvoke = state.fire, state.invoke
-        genv.ld_net = state
-    end
-    state.hub = {mc = mc, onNet = onNet}
-    if not state.mode then
-        local hookF = wrapNet(state, "Fire", function() return state.fire end)
-        pcall(function() net.Fire = hookF end)
-        if net.Fire == hookF then
-            state.mode, state.hookF = "field", hookF
-            if type(state.invoke) == "function" then
-                local hookI = wrapNet(state, "Invoke", function() return state.invoke end)
-                pcall(function() net.Invoke = hookI end)
-                if net.Invoke == hookI then state.hookI = hookI end
-            end
-        else
-            pcall(function() net.Fire = state.fire end)
-            if not installDeepHook(state) then return false end
-        end
-    end
-    useRaw(state)
-    return true
+    recordStep("skip", nil, Vector3.zero, nil, {})
 end
 
 local function same(myMatch)
@@ -2522,28 +2447,6 @@ function MX.findWait(s, myMatch, timeout)
     end, timeout or 2.5, myMatch, 0.05)
     return m, e
 end
-function MX.decodeArgs(s, first)
-    local args, n = {}, tonumber(s.an) or 0
-    if type(s.a) == "table" then
-        for i = 1, n do args[i] = decArg(s.a[i]) end
-    end
-    if first ~= nil then
-        table.insert(args, 1, first)
-        n = n + 1
-    end
-    return args, n
-end
-function MX.send(s, args, n)
-    if s.nk == "Invoke" then
-        local f = FW.origInvoke or (FW.net() and FW.net().Invoke)
-        if type(f) ~= "function" then return false end
-        local ok, res = pcall(function() return f(s.ev, table.unpack(args, 1, n)) end)
-        return ok and res ~= false
-    end
-    local f = FW.origFire or (FW.net() and FW.net().Fire)
-    if type(f) ~= "function" then return false end
-    return (pcall(function() f(s.ev, table.unpack(args, 1, n)) end))
-end
 function MX.place(s, myMatch)
     local p = a2v(s.p)
     local have, he = TR.at(p, s.n, mc.claim)
@@ -2552,7 +2455,7 @@ function MX.place(s, myMatch)
         if s.k then mc.k2pos[s.k] = he.pos end
         return true, have
     end
-    if not s.ev then return false end
+    if not s.n then return false end
     local attempts, moneyFails = 0, 0
     while same(myMatch) do
         local there, te = TR.at(p, s.n, mc.claim)
@@ -2580,8 +2483,14 @@ function MX.place(s, myMatch)
         end
         local before = money()
         local calledAt = os.clock()
-        local args, n = MX.decodeArgs(s)
-        local sent = MX.send(s, args, n)
+        local sent, why = GU.place(s.n, p)
+        if not sent and why == "not in hotbar" then
+            if not mc.warnedHotbar[s.n] then
+                mc.warnedHotbar[s.n] = true
+                flash(tostring(s.n) .. " is not equipped: step skipped", "Warning")
+            end
+            return false
+        end
         MX.touch(0.4)
         local nm, ne
         if sent then
@@ -2609,6 +2518,7 @@ function MX.place(s, myMatch)
             return true, nm
         end
         mc.spend = nil
+        GU.stopPlacing()
         if money() < price then
             moneyFails = moneyFails + 1
             if not sleep(0.35 + 0.15 * math.min(moneyFails, 8), myMatch) then return false end
@@ -2715,8 +2625,7 @@ function MX.act(s, myMatch)
     if not s.ev then return false end
     local m = MX.findWait(s, myMatch)
     if not m then return false end
-    local args, n = MX.decodeArgs(s, m)
-    MX.send(s, args, n)
+    if TOWER_BTN[s.ev] then FW.fire(s.ev, m) end
     MX.touch(0.3)
     return sleep(0.35, myMatch)
 end
@@ -3384,12 +3293,7 @@ recToggle = recGrid:AddToggle({
                 recToggle:Set(false, true)
                 return
             end
-            mc.hook = installHook()
-            if not mc.hook then
-                flash("Recording failed: the game network could not be hooked", "Error")
-                recToggle:Set(false, true)
-                return
-            end
+            mc.hook = true
             resetRecorder()
             mc.map = currentMap()
             mc.rec = true
@@ -4182,6 +4086,9 @@ local function initMatch()
     end
     local votes = MD.obj("VoteSkipPlayers")
     if votes then
+        votes.ChildAdded:Connect(function(c)
+            if alive() and c.Name == tostring(lp.UserId) and mc.cb.skip then pcall(mc.cb.skip) end
+        end)
         votes.ChildRemoved:Connect(function()
             if alive() and cfg.autoSkip then pcall(MT.trySkip) end
         end)
