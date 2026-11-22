@@ -2121,10 +2121,16 @@ end
 function MT.waveChanged(n)
     n = tonumber(n) or 0
     if n <= 0 then
-        if mc.wave > 0 and not mc.finalSeen then MT.newMatch() end
+        -- a wave counter that drops to 0 mid-round is not a new match; the next round is caught by finalSeen
+        if mc.wave > 0 and not mc.finalSeen then warn("[ld] wave counter went to 0 on wave " .. mc.wave) end
         return
     end
-    if (n < mc.wave and not mc.finalSeen) or (n == 1 and mc.finalSeen) then MT.newMatch() end
+    if n < mc.wave and not mc.finalSeen then
+        warn("[ld] new match: wave " .. mc.wave .. " -> " .. n)
+        MT.newMatch()
+    elseif n <= 1 and mc.finalSeen and mc.wave > 1 then
+        MT.newMatch()
+    end
     mc.wave = n
     st.waveStart = os.clock()
     if n == 1 or not st.matchStart then st.matchStart = os.clock() end
@@ -2348,6 +2354,8 @@ function WH.matchEnd()
 end
 function MT.ended(stat)
     if mc.finalSeen then return end
+    -- a finish screen before any wave was played is the previous round's leftover, not this match's end
+    if mc.wave < 1 and MD.wave() < 1 then return end
     mc.finalSeen = true
     if stat then WH.last = stat end
     WH.matchEnd()
