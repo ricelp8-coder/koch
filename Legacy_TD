@@ -221,6 +221,12 @@ local DiamondUI = (function()
         elseif o.Type == "Error" then
             title = title .. " - Error"
         end
+        local setId = setthreadidentity or set_thread_identity or (syn and syn.set_thread_identity)
+        local getId = getthreadidentity or get_thread_identity or (syn and syn.get_thread_identity)
+        if type(setId) == "function" and type(getId) == "function" then
+            local okI, id = pcall(getId)
+            if okI and tonumber(id) and tonumber(id) < 3 then pcall(setId, 8) end
+        end
         local ok, err = pcall(function()
             Library:Notify({Title = title, Description = content, Time = dur})
         end)
@@ -1100,11 +1106,19 @@ function GU.fireSignal(sig)
             if #cs == 0 then return false end -- nobody listens: a fired signal would be a silent no-op
         end
     end
-    if type(firesignal) == "function" and pcall(firesignal, sig) then return true end
+    -- presses run on their own thread: some executors leave the calling thread without its identity after
+    -- firesignal, and a handler that yields (a popup) must not hold the caller
+    if type(firesignal) == "function" then
+        local res
+        task.spawn(function() res = pcall(firesignal, sig) end)
+        if res ~= false then return true end
+    end
     if not cs then return false end
     local any = false
     for _, c in ipairs(cs) do
-        if pcall(function() c:Fire() end) then
+        local res
+        task.spawn(function() res = pcall(function() c:Fire() end) end)
+        if res ~= false then
             any = true
         else
             -- executors without Connection:Fire still expose the handler itself
@@ -1295,7 +1309,9 @@ function GU.placeNow(name, pos)
     local pl = fw and fw.Placement
     local cam = workspace.CurrentCamera
     local saveType, saveCf = cam.CameraType, cam.CFrame
-    local hold = CFrame.lookAt(pos + Vector3.new(0, 40, 0.05), pos)
+    local base = CFrame.lookAt(pos + Vector3.new(0, 40, 0.05), pos)
+    local look = pos - base.RightVector * 10 -- the spot sits right of centre, away from the phone thumbstick area
+    local hold = CFrame.lookAt(look + Vector3.new(0, 40, 0.05), look)
     local RunS = game:GetService("RunService")
     local bound = pcall(function()
         RunS:BindToRenderStep("ld_place_cam", Enum.RenderPriority.Camera.Value + 10, function()
@@ -1304,10 +1320,19 @@ function GU.placeNow(name, pos)
         end)
     end)
     local hidden = GU.ownGuis(false)
-    local started = false
-    local conn
+    local started, ended, placed = false, false, false
+    local conns = {}
     if pl and pl.PlacementStarted then
-        pcall(function() conn = pl.PlacementStarted:Connect(function() started = true end) end)
+        pcall(function() conns[#conns + 1] = pl.PlacementStarted:Connect(function() started = true end) end)
+    end
+    if pl and pl.PlacementEnded then
+        pcall(function() conns[#conns + 1] = pl.PlacementEnded:Connect(function() ended = true end) end)
+    end
+    local tf = TW.folder()
+    if tf then
+        conns[#conns + 1] = tf.ChildAdded:Connect(function(m)
+            if m.Name == name then placed = true end
+        end)
     end
     local ok, err = pcall(function()
         cam.CameraType = Enum.CameraType.Scriptable
@@ -1321,16 +1346,55 @@ function GU.placeNow(name, pos)
         if not GU.mouseTo(sp.X, sp.Y) then error("no mouse input in this executor", 0) end
         task.wait(0.06)
         sp = cam:WorldToViewportPoint(pos)
-        if not GU.clickAt(sp.X, sp.Y) then error("no mouse input in this executor", 0) end
-        task.wait(0.05)
+        local mx, my = GU.mouseTo(sp.X, sp.Y)
+        if not mx then error("no mouse input in this executor", 0) end
+        local v = GU.vim()
+        local ways = {
+            click = function()
+                v:SendMouseButtonEvent(mx, my, 0, true, game, 0)
+                task.wait()
+                v:SendMouseButtonEvent(mx, my, 0, false, game, 0)
+            end,
+            touch = function()
+                v:SendTouchEvent(7, 0, mx, my)
+                task.wait(0.05)
+                v:SendTouchEvent(7, 2, mx, my)
+            end,
+            hold = function()
+                v:SendMouseButtonEvent(mx, my, 0, true, game, 0)
+                task.wait(0.15)
+                v:SendMouseButtonEvent(mx, my, 0, false, game, 0)
+            end,
+        }
+        local order = {"click", "touch", "hold"}
+        if GU.confirmWay then table.insert(order, 1, GU.confirmWay) end
+        local used, tried = nil, {}
+        for _, way in ipairs(order) do
+            if not tried[way] and v then
+                tried[way] = true
+                local okW, errW = pcall(ways[way])
+                if okW then
+                    local t1 = os.clock()
+                    while not (placed or ended) and os.clock() - t1 < 0.5 do task.wait() end
+                    if placed or ended then
+                        used = way
+                        break
+                    end
+                else
+                    warn("[ld] place via " .. way .. " failed: " .. tostring(errW))
+                end
+            end
+        end
+        if not v and type(mouse1click) == "function" then pcall(mouse1click) end
+        if used then GU.confirmWay = used end
         local dg = GU.diag
         local hit = lp:GetMouse().Hit.Position
         local function v2(v) return v and string.format("%.0f,%.0f", v.X, v.Y) or "-" end
-        warn(string.format("[ld] place %s: screen %.0f,%.0f | engine %s / %s / %s | mouse hit %.1f,%.1f want %.1f,%.1f | started=%s",
+        warn(string.format("[ld] place %s: screen %.0f,%.0f | engine %s / %s / %s | mouse hit %.1f,%.1f want %.1f,%.1f | started=%s confirmed=%s",
             tostring(name), sp.X, sp.Y, v2(dg and dg.l1), v2(dg and dg.l2), v2(dg and dg.l3),
-            hit.X, hit.Z, pos.X, pos.Z, tostring(started)))
+            hit.X, hit.Z, pos.X, pos.Z, tostring(started), tostring(used or "none")))
     end)
-    if conn then pcall(function() conn:Disconnect() end) end
+    for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
     if bound then pcall(function() RunS:UnbindFromRenderStep("ld_place_cam") end) end
     pcall(function()
         cam.CameraType = saveType
