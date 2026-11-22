@@ -1120,33 +1120,44 @@ end
 local UIS = game:GetService("UserInputService")
 -- moves the mouse until the engine reports it at (x, y) in GetMouseLocation space; this absorbs the top bar inset
 -- and the pixel scale of phones, where the injected coordinates and the game's coordinates differ
-function GU.mouseTo(x, y)
+GU.diag = nil
+function GU.moveRaw(mx, my)
     local v = GU.vim()
-    local mx, my, gx, gy = x, y, 1, 1
-    local last
-    for _ = 1, 8 do
-        local sent = false
-        if v then sent = pcall(function() v:SendMouseMoveEvent(mx, my, game) end) end
-        if not sent and type(mousemoveabs) == "function" then sent = pcall(mousemoveabs, mx, my) end
-        if not sent then return nil end
+    if v and pcall(function() v:SendMouseMoveEvent(mx, my, game) end) then return true end
+    if type(mousemoveabs) == "function" and pcall(mousemoveabs, mx, my) then return true end
+    return false
+end
+function GU.readMouse(mx, my)
+    if not GU.moveRaw(mx, my) then return nil end
+    task.wait()
+    task.wait()
+    return UIS:GetMouseLocation()
+end
+-- moves the mouse so the engine sees it at (x, y) in GetMouseLocation space. The engine is probed twice to learn the
+-- offset (top bar) and scale (phone pixels) between injected and game coordinates; when the probes make no sense the
+-- plain point is used, so the worst case is the uncorrected click
+function GU.mouseTo(x, y)
+    local l1 = GU.readMouse(x, y)
+    if not l1 then return nil end
+    GU.diag = {x = x, y = y, l1 = l1}
+    if math.abs(l1.X - x) <= 1.5 and math.abs(l1.Y - y) <= 1.5 then return x, y end
+    local d = 40
+    local l2 = GU.readMouse(x + d, y + d)
+    if not l2 then return x, y end
+    local gx, gy = (l2.X - l1.X) / d, (l2.Y - l1.Y) / d
+    GU.diag.l2, GU.diag.gx, GU.diag.gy = l2, gx, gy
+    if gx < 0.3 or gx > 4 or gy < 0.3 or gy > 4 then
+        GU.moveRaw(x, y)
         task.wait()
-        task.wait()
-        local loc = UIS:GetMouseLocation()
-        local ex, ey = x - loc.X, y - loc.Y
-        if math.abs(ex) <= 1.5 and math.abs(ey) <= 1.5 then return mx, my end
-        if last then
-            local dmx, dmy = mx - last.mx, my - last.my
-            local dlx, dly = loc.X - last.lx, loc.Y - last.ly
-            if (math.abs(dmx) > 2 or math.abs(dmy) > 2) and math.abs(dlx) < 0.5 and math.abs(dly) < 0.5 then
-                return x, y -- the engine does not report the injected mouse: no feedback, use the plain point
-            end
-            if math.abs(dmx) > 2 and math.abs(dlx) > 0.5 then gx = math.clamp(dlx / dmx, 0.2, 5) end
-            if math.abs(dmy) > 2 and math.abs(dly) > 0.5 then gy = math.clamp(dly / dmy, 0.2, 5) end
-        end
-        last = {mx = mx, my = my, lx = loc.X, ly = loc.Y}
-        mx, my = mx + ex / gx, my + ey / gy
+        return x, y
     end
-    return mx, my
+    local mx, my = x + (x - l1.X) / gx, y + (y - l1.Y) / gy
+    local l3 = GU.readMouse(mx, my)
+    GU.diag.mx, GU.diag.my, GU.diag.l3 = mx, my, l3
+    if l3 and math.abs(l3.X - x) <= 3 and math.abs(l3.Y - y) <= 3 then return mx, my end
+    GU.moveRaw(x, y)
+    task.wait()
+    return x, y
 end
 function GU.clickAt(x, y)
     local mx, my = GU.mouseTo(x, y)
@@ -1312,6 +1323,12 @@ function GU.placeNow(name, pos)
         sp = cam:WorldToViewportPoint(pos)
         if not GU.clickAt(sp.X, sp.Y) then error("no mouse input in this executor", 0) end
         task.wait(0.05)
+        local dg = GU.diag
+        local hit = lp:GetMouse().Hit.Position
+        local function v2(v) return v and string.format("%.0f,%.0f", v.X, v.Y) or "-" end
+        warn(string.format("[ld] place %s: screen %.0f,%.0f | engine %s / %s / %s | mouse hit %.1f,%.1f want %.1f,%.1f | started=%s",
+            tostring(name), sp.X, sp.Y, v2(dg and dg.l1), v2(dg and dg.l2), v2(dg and dg.l3),
+            hit.X, hit.Z, pos.X, pos.Z, tostring(started)))
     end)
     if conn then pcall(function() conn:Disconnect() end) end
     if bound then pcall(function() RunS:UnbindFromRenderStep("ld_place_cam") end) end
