@@ -207,6 +207,18 @@ local DiamondUI = (function()
     end
 
     local recent = {}
+    local noteQueue = {}
+    task.spawn(function()
+        while true do
+            local job = table.remove(noteQueue, 1)
+            if job then
+                local ok, err = pcall(job)
+                if not ok then warn("[DiamondHub] notify failed: " .. tostring(err)) end
+            else
+                task.wait(0.05)
+            end
+        end
+    end)
     function Lib:Notify(a, b, c)
         local o = type(a) == "table" and a or {Title = a, Content = b, Duration = c}
         local title = tostring(o.Title or "")
@@ -221,16 +233,9 @@ local DiamondUI = (function()
         elseif o.Type == "Error" then
             title = title .. " - Error"
         end
-        local setId = setthreadidentity or set_thread_identity or (syn and syn.set_thread_identity)
-        local getId = getthreadidentity or get_thread_identity or (syn and syn.get_thread_identity)
-        if type(setId) == "function" and type(getId) == "function" then
-            local okI, id = pcall(getId)
-            if okI and tonumber(id) and tonumber(id) < 3 then pcall(setId, 8) end
-        end
-        local ok, err = pcall(function()
+        table.insert(noteQueue, function()
             Library:Notify({Title = title, Description = content, Time = dur})
         end)
-        if not ok then warn("[DiamondHub] notify failed: " .. tostring(err)) end
     end
 
     function Lib.IsOwnGui(g)
@@ -1309,9 +1314,9 @@ function GU.placeNow(name, pos)
     local pl = fw and fw.Placement
     local cam = workspace.CurrentCamera
     local saveType, saveCf = cam.CameraType, cam.CFrame
-    local base = CFrame.lookAt(pos + Vector3.new(0, 40, 0.05), pos)
-    local look = pos - base.RightVector * 10 -- the spot sits right of centre, away from the phone thumbstick area
-    local hold = CFrame.lookAt(look + Vector3.new(0, 40, 0.05), look)
+    -- the spot is held at the screen centre: on phones the injected mouse and the viewport differ in scale,
+    -- and the centre is the one point where both agree
+    local hold = CFrame.lookAt(pos + Vector3.new(0, 40, 0.05), pos)
     local RunS = game:GetService("RunService")
     local bound = pcall(function()
         RunS:BindToRenderStep("ld_place_cam", Enum.RenderPriority.Camera.Value + 10, function()
@@ -1356,9 +1361,19 @@ function GU.placeNow(name, pos)
                 v:SendMouseButtonEvent(mx, my, 0, false, game, 0)
             end,
             touch = function()
-                v:SendTouchEvent(7, 0, mx, my)
+                local cx, cy = sp.X, sp.Y
+                v:SendTouchEvent(7, 0, cx, cy)
+                task.wait(0.03)
+                v:SendTouchEvent(7, 1, cx, cy)
                 task.wait(0.05)
-                v:SendTouchEvent(7, 2, mx, my)
+                v:SendTouchEvent(7, 2, cx, cy)
+            end,
+            touch2 = function()
+                v:SendTouchEvent(8, 0, mx, my)
+                task.wait(0.03)
+                v:SendTouchEvent(8, 1, mx, my)
+                task.wait(0.05)
+                v:SendTouchEvent(8, 2, mx, my)
             end,
             hold = function()
                 v:SendMouseButtonEvent(mx, my, 0, true, game, 0)
@@ -1366,7 +1381,7 @@ function GU.placeNow(name, pos)
                 v:SendMouseButtonEvent(mx, my, 0, false, game, 0)
             end,
         }
-        local order = {"click", "touch", "hold"}
+        local order = {"click", "touch", "touch2", "hold"}
         if GU.confirmWay then table.insert(order, 1, GU.confirmWay) end
         local used, tried = nil, {}
         for _, way in ipairs(order) do
@@ -1387,6 +1402,23 @@ function GU.placeNow(name, pos)
         end
         if not v and type(mouse1click) == "function" then pcall(mouse1click) end
         if used then GU.confirmWay = used end
+        if not GU.dumped and pl then
+            GU.dumped = true
+            local keys = {}
+            pcall(function()
+                for k, val in pairs(pl) do keys[#keys + 1] = tostring(k) .. ":" .. typeof(val) end
+                local mt = getmetatable(pl)
+                if type(mt) == "table" and type(mt.__index) == "table" then
+                    for k, val in pairs(mt.__index) do keys[#keys + 1] = "mt." .. tostring(k) .. ":" .. typeof(val) end
+                end
+            end)
+            table.sort(keys)
+            warn("[ld] placement api: " .. table.concat(keys, ", "))
+            local vs = cam.ViewportSize
+            local ms = lp:GetMouse()
+            warn(string.format("[ld] screen: viewport %.0fx%.0f | mouse location %s | mouse xy %d,%d | touch=%s mouse=%s",
+                vs.X, vs.Y, tostring(UIS:GetMouseLocation()), ms.X, ms.Y, tostring(UIS.TouchEnabled), tostring(UIS.MouseEnabled)))
+        end
         local dg = GU.diag
         local hit = lp:GetMouse().Hit.Position
         local function v2(v) return v and string.format("%.0f,%.0f", v.X, v.Y) or "-" end
