@@ -182,13 +182,10 @@ local cfg = {
     summonCrate = "Basic Crate",
     autoTeleport = false,
     autoClaimQuests = false,
-    autoClaimHalloween = false,
     autoClaimRanks = false,
     hideName = false,
     hideUser = false,
     fpsBoost = false,
-    autoVoteEvent = false,
-    eventMode = "HalloweenEasy",
     autoOpenCrate = false,
     openCrateName = "Exclusive Halloween Crate",
     openCrateAmount = 1,
@@ -359,15 +356,9 @@ local function findUI(name)
     uiMiss[name] = (o == nil) and now or nil
     return o
 end
-local function eventVotingOpen()
-    local gv = findUI("GamemodeVoting")
-    local ev = gv and gv:FindFirstChild("HalloweenMode")
-    return ev ~= nil and visible(ev)
-end
 local function votingOpen()
     local gv = findUI("GamemodeVoting")
     if not gv then return false end
-    if eventVotingOpen() then return true end
     return visible(gv:FindFirstChild("MainFrame") or gv)
 end
 local function finalOpen()
@@ -1009,55 +1000,6 @@ function LB.questClaim(key, r, ...)
     LB.claimNext = os.clock() + 2
     return true
 end
-local BP_ROOT = "Main/Main/Battlepass/BattlepassFrame/EventPass/"
-function LB.tierClaimed(bp, tier, premium)
-    local group = type(bp.ClaimedTiers) == "table" and bp.ClaimedTiers[premium and "Premium" or "Default"]
-    if type(group) ~= "table" then return nil end
-    if group[tier] == true or group[tostring(tier)] == true then return true end
-    for _, v in pairs(group) do
-        if type(v) ~= "boolean" and tonumber(v) == tier then return true end
-    end
-    local price = INV.path(pg, BP_ROOT .. "List/ScrollingFrame/Tier_" .. tier .. "/Holder/"
-        .. (premium and "Premium" or "Free") .. "/TroopFrame/TroopsFrame/Price")
-    if price and tostring(price.Text):lower() == "claimed" then return true end
-    return false
-end
-function LB.tierAvailable(bp, tier, premium)
-    local cur = tonumber(bp.CurrentTier) or 0
-    if premium then return bp.Premium == true and tier <= cur end
-    if tier <= cur then return true end
-    if tier ~= (tonumber(bp.NextTier) or (cur + 1)) then return false end
-    local frame = INV.path(pg, BP_ROOT .. "List/ScrollingFrame/Tier_" .. tier .. "/Holder/Free/TroopFrame/TroopsFrame")
-    local priceLabel = frame and frame:FindFirstChild("Price")
-    local priceText = priceLabel and tostring(priceLabel.Text):lower() or ""
-    if priceText:find("claimed", 1, true) or priceText:find("away", 1, true) then return false end
-    local button = frame and frame:FindFirstChild("ClaimButton")
-    if button and button.Visible then return true end
-    local info = INV.path(pg, BP_ROOT .. "Info/CurrentTier")
-    local nextLabel = info and info:FindFirstChild("NextTier")
-    local xpLabel = info and info:FindFirstChild("XP")
-    local nextTier = nextLabel and tonumber(tostring(nextLabel.Text):match("%d+"))
-    local need = xpLabel and tonumber((tostring(xpLabel.Text):gsub(",", "")):match("/%s*(%d+)%s*XP"))
-    return nextTier == tier and need ~= nil and need > 0 and (tonumber(bp.EXP) or 0) >= need
-end
-function LB.claimTiers(bp)
-    local rt = LB.R.ClaimTier
-    local cur = tonumber(bp.CurrentTier)
-    if not (rt and cur) then return end
-    local top = math.min(500, math.max(cur, tonumber(bp.NextTier) or (cur + 1)))
-    local pq = type(bp.PassQuests) == "table" and bp.PassQuests or nil
-    local stamp = tostring(pq and pq.LastUpdate or 0)
-    for tier = 1, top do
-        for pass = 1, 2 do
-            local premium = pass == 2
-            local key = stamp .. "/Tier/" .. tier .. "/" .. tostring(premium)
-            if LB.claims[key] ~= true and LB.tierAvailable(bp, tier, premium)
-                and LB.tierClaimed(bp, tier, premium) == false then
-                if LB.questClaim(key, rt, tier, premium) then return end
-            end
-        end
-    end
-end
 function LB.guiQuests()
     local out = {}
     local list = INV.path(pg, "Main/Main/Quests/QuestsFrame/AllQuests/List")
@@ -1115,7 +1057,7 @@ function LB.claimRanks(data)
 end
 function LB.claimQuests()
     if LB.questBusy then return end
-    if not (cfg.autoClaimQuests or cfg.autoClaimHalloween or cfg.autoClaimRanks) then return end
+    if not (cfg.autoClaimQuests or cfg.autoClaimRanks) then return end
     if LB.inMatch() or LB.teleporting then return end
     LB.questBusy = true
     local ok, err = pcall(function()
@@ -1142,23 +1084,6 @@ function LB.claimQuests()
                 end
             end
         end
-        local rp = LB.R.CollectPassQuest
-        local bp = data and type(data.Battlepass) == "table" and data.Battlepass or nil
-        if cfg.autoClaimHalloween and bp then
-            local pq = bp.PassQuests
-            if rp and type(pq) == "table" and type(pq.Quests) == "table" then
-                local stamp, ids = tostring(pq.LastUpdate or 0), {}
-                for _, q in pairs(pq.Quests) do
-                    if questDone(q) and type(q.Id) == "string" then ids[#ids + 1] = q.Id end
-                end
-                table.sort(ids)
-                for _, id in ipairs(ids) do
-                    if not cfg.autoClaimHalloween then break end
-                    LB.questClaim(stamp .. "/Pass/" .. id, rp, id)
-                end
-            end
-            if cfg.autoClaimHalloween then LB.claimTiers(bp) end
-        end
         if cfg.autoClaimRanks then LB.claimRanks(data) end
     end)
     LB.questBusy = false
@@ -1168,7 +1093,7 @@ function LB.init(ev, fn)
     local wanted = {SummonTowers = true, ElevatorEnter = true, ElevatorStart = true, ElevatorEntered = true,
         ElevatorLeave = true, ElevatorLeft = true,
         ElevatorTeleporting = true, ElevatorSetModifiers = true, ElevatorModifiersUpdated = true,
-        CollectQuest = true, CollectPassQuest = true, ClaimTier = true, SendPassQuestData = true, ClaimRankReward = true,
+        CollectQuest = true, SendPassQuestData = true, ClaimRankReward = true,
         SellPart = true, OpenCrate = true}
     local function adopt(r)
         if not wanted[r.Name] or LB.R[r.Name] then return end
@@ -1192,7 +1117,7 @@ function LB.init(ev, fn)
             end)
         elseif r.Name == "SendPassQuestData" then
             r.OnClientEvent:Connect(function()
-                if cfg.autoClaimQuests or cfg.autoClaimHalloween or cfg.autoClaimRanks then task.delay(0.5, LB.claimQuests) end
+                if cfg.autoClaimQuests or cfg.autoClaimRanks then task.delay(0.5, LB.claimQuests) end
             end)
         elseif r.Name == "ElevatorTeleporting" then
             r.OnClientEvent:Connect(function()
@@ -1211,7 +1136,7 @@ function LB.init(ev, fn)
     task.spawn(function()
         while alive() do
             task.wait(1)
-            if cfg.autoClaimQuests or cfg.autoClaimHalloween or cfg.autoClaimRanks then pcall(LB.claimQuests) end
+            if cfg.autoClaimQuests or cfg.autoClaimRanks then pcall(LB.claimQuests) end
         end
     end)
     task.spawn(function()
@@ -3085,27 +3010,6 @@ invSec:AddToggle({
     Name = "Auto Open Crate", Flag = "autoOpenCrate", Tooltip = "Opens owned crates while the unit inventory has space (lobby only)",
     Callback = function(v) cfg.autoOpenCrate = v end,
 })
-local eventTab = Win:AddTab("Event", {Icon = "ghost"})
-local hallowMatch = eventTab:AddSection("Match")
-hallowMatch:AddToggle({
-    Name = "Auto Vote", Flag = "autoVoteEvent", Tooltip = "Votes for the Halloween mode on the vote screen",
-    Callback = function(v)
-        cfg.autoVoteEvent = v
-        st.voted = false
-    end,
-})
-hallowMatch:AddDropdown({
-    Name = "Vote Mode", Flag = "eventMode", Options = {"Easy", "Hard"}, Default = (cfg.eventMode == "HalloweenHard") and "Hard" or "Easy", Searchable = false,
-    Callback = function(v) cfg.eventMode = (v == "Hard") and "HalloweenHard" or "HalloweenEasy" end,
-})
-local hallowSec = eventTab:AddSection("Lobby")
-hallowSec:AddToggle({
-    Name = "Auto Claim Halloween Awards", Flag = "autoClaimHalloween", Tooltip = "Claims finished Halloween pass quests and reachable pass tier rewards, one request every 2s (lobby only)",
-    Callback = function(v)
-        cfg.autoClaimHalloween = v
-        if v then task.spawn(LB.claimQuests) end
-    end,
-})
 local macroTab = Win:AddTab("Macro", {Icon = "circle-dot"})
 local recSec = macroTab:AddSection("Recorder")
 local recGrid = recSec:AddGrid({Columns = 2, CellHeight = 34})
@@ -4094,9 +3998,7 @@ local function init()
                 end
                 st.finalShown = false
                 local voteMode
-                if eventVotingOpen() then
-                    voteMode = cfg.autoVoteEvent and cfg.eventMode or (cfg.autoVote and cfg.mode or nil)
-                elseif cfg.autoVote then
+                if cfg.autoVote then
                     voteMode = cfg.mode
                 end
                 if voteMode then
