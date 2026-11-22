@@ -1251,7 +1251,85 @@ function GU.stopPlacing()
     local pl = fw and fw.Placement
     if pl and type(pl.Stop) == "function" then pcall(pl.Stop) end
 end
-function GU.route(ev, a)
+-- lobby: the same idea, the game's own buttons and its own confirmation popup
+function GU.big(names, timeout)
+    local frame = path(pg, "MainFrames/NotificationFrame")
+    local t0 = os.clock()
+    while os.clock() - t0 < (timeout or 3) do
+        if frame and frame.Visible then
+            for _, n in ipairs(names) do
+                local b = path(frame, "BigNotification/Buttons/" .. n)
+                if b and b.Visible and b:FindFirstChild("Btn") then return GU.press(b.Btn), n end
+            end
+        end
+        task.wait(0.05)
+    end
+    return false
+end
+function GU.dismiss()
+    local frame = path(pg, "MainFrames/NotificationFrame")
+    if frame and frame.Visible then GU.big({"OkButton", "NoButton", "Button2"}, 0.2) end
+end
+function GU.pressAsync(btn)
+    task.spawn(function() pcall(GU.press, btn) end)
+end
+function GU.invItem(uid)
+    local list = path(pg, "Lobby/UnitFrame/UnitList")
+    local f = list and list:FindFirstChild(tostring(uid), true)
+    return f and f:FindFirstChild("InteractiveButton", true)
+end
+function GU.sellBtn() return path(pg, "Lobby/UnitFrame/Buttons/SellUnits/Button") end
+function GU.invMode()
+    local b = GU.sellBtn()
+    if not b then return nil end
+    return tostring(b.Text) == "Sell Units" and "Normal" or "Sell"
+end
+function GU.openCrate(uid, amount)
+    if GU.invMode() == "Sell" then GU.press(GU.sellBtn()) task.wait(0.15) end
+    local b = GU.invItem(uid)
+    if not b then return false end
+    GU.pressAsync(b)
+    local names = amount == 10 and {"Button3", "YesButton"} or {"YesButton", "Button1"}
+    return (GU.big(names, 3))
+end
+function GU.sellUnits(ids)
+    local btn = GU.sellBtn()
+    if not btn then return false end
+    if GU.invMode() ~= "Sell" then
+        GU.press(btn)
+        task.wait(0.15)
+    end
+    if GU.invMode() ~= "Sell" then return false end
+    local picked = 0
+    for _, uid in ipairs(ids) do
+        local b = GU.invItem(uid)
+        local icon = b and b.Parent and b.Parent:FindFirstChild("BulkSellIcon")
+        if b and icon and not icon.Visible then
+            GU.press(b)
+            task.wait(0.03)
+            GU.dismiss()
+        end
+        if icon and icon.Visible then picked = picked + 1 end
+    end
+    if picked == 0 then
+        GU.press(btn)
+        return false
+    end
+    GU.pressAsync(btn)
+    return (GU.big({"YesButton"}, 3))
+end
+function GU.claimQuest(kind, id)
+    local b = path(pg, "Lobby/QuestsFrame/QuestMainFrame/MainFrame/AllQuests/" .. tostring(kind) .. "/" .. tostring(id) .. "/Progress/ClaimButton")
+    return GU.press(b)
+end
+function GU.route(ev, a, ...)
+    if ev == "Summon1" or ev == "Summon10" then
+        return GU.press(path(pg, "Lobby/SummonShopFrame/SummonMenu/RightMenu/BuyButtons/" .. ev))
+    end
+    if ev == "StartTeleport" then return GU.press(path(pg, "Lobby/QueueFrame/Start")) end
+    if ev == "ClaimQuestReward" then return GU.claimQuest(a, (...)) end
+    if ev == "Open1Crate" or ev == "Open10Crate" then return GU.openCrate(a, ev == "Open10Crate" and 10 or 1) end
+    if ev == "SellTroops" then return GU.sellUnits(type(a) == "table" and a or {}) end
     if ev == "VoteMap" then return GU.vote(a) end
     if ev == "VoteSkipWave" then return GU.skip() end
     if TOWER_BTN[ev] then return GU.tower(ev, a) end
@@ -1262,17 +1340,9 @@ end
 function FW.fire(ev, ...)
     local r = GU.route(ev, ...)
     if r ~= nil then return r end
-    local n = FW.net()
-    if not n then return false end
-    return (pcall(n.Fire, ev, ...))
-end
-function FW.invoke(ev, ...)
-    local n = FW.net()
-    if not n then return false end
-    local f = FW.origInvoke or n.Invoke
-    local ok, res = pcall(f, ev, ...)
-    if not ok then return false end
-    return res == nil and true or res
+    -- no button for this request: never send it ourselves
+    warn("[ld] no game button for " .. tostring(ev) .. ", skipped")
+    return false
 end
 
 function TW.folder() return workspace:FindFirstChild("Troops") end
@@ -1294,7 +1364,10 @@ function TW.level(m)
 end
 function TW.target(m)
     local t = m:FindFirstChild("TroopTarget")
-    return t and t.Value or nil
+    local v = t and t.Value
+    if v == nil then return nil end
+    if type(v) ~= "string" and type(v) ~= "number" then return tostring(v) end
+    return v
 end
 function TW.def(name)
     local d = FW.shared("TroopDatas")
@@ -1898,7 +1971,10 @@ function TR.at(pos, name, skip)
     return best, bestE
 end
 function TR.add(m)
-    if mc.reg[m] then return end
+    if mc.reg[m] then
+        mc.reg[m].away = nil
+        return
+    end
     local pos = TW.pos(m)
     if not pos then return end
     local e = {pos = pos, name = m.Name, at = os.clock()}
@@ -1919,14 +1995,30 @@ function TR.add(m)
             if alive() and mc.cb.target then pcall(mc.cb.target, m, e) end
         end)
     end
+    m.AncestryChanged:Connect(function(_, parent)
+        if parent == nil and alive() then TR.gone(m) end
+    end)
     if mc.cb.place then pcall(mc.cb.place, m, e) end
 end
-function TR.removed(m)
+-- a frozen or stunned unit is moved to FrozenTroops/StunnedTroops and back: only a destroyed unit counts as sold
+function TR.gone(m)
     local e = mc.reg[m]
     if not e or e.gone then return end
     e.gone = os.clock()
     if alive() and mc.cb.sell then pcall(mc.cb.sell, m, e) end
     task.delay(2, function() if mc.reg[m] == e then mc.reg[m] = nil end end)
+end
+function TR.removed(m)
+    local e = mc.reg[m]
+    if not e or e.gone then return end
+    task.delay(0.1, function()
+        if mc.reg[m] ~= e or e.gone then return end
+        if m.Parent ~= nil and m:IsDescendantOf(workspace) then
+            e.away = true
+            return
+        end
+        TR.gone(m)
+    end)
 end
 function TR.consider(m)
     if not alive() or not m:IsA("Model") then return end
