@@ -1223,14 +1223,6 @@ function GU.locked(fn, ...)
     return table.unpack(res, 2, res.n)
 end
 function GU.tower(ev, m)
-    if mc.netTest and mc.playing then
-        -- test mode: the macro sends unit actions straight to the game's Network (this broke sessions before)
-        local net = FW.net()
-        if not net then return false end
-        local ok, err = pcall(net.Fire, ev, m)
-        if not ok then warn("[ld] net test " .. tostring(ev) .. ": " .. tostring(err)) end
-        return ok
-    end
     return GU.locked(function()
         if not GU.inspect(m) then return false end
         return GU.press(path(pg, TOWER_BTN[ev]))
@@ -3595,11 +3587,6 @@ recSec:AddToggle({
     Name = "Auto Save After The Match Ends", Flag = "autoSaveRec", Default = true,
     Tooltip = "Saves the recording by itself when the round ends. When off, the steps stay loaded and you save them with the Save button",
     Callback = function(v) mc.autoSave = v end,
-})
-recSec:AddToggle({
-    Name = "Playback Unit Actions Via Network (Test)", NoSave = true, Default = false,
-    Tooltip = "Test only: during playback, upgrade, sell and target are sent straight to the game's Network instead of pressing its buttons. Placement still clicks (its request is hidden inside the game's placement module). Direct Network calls broke the session before: rejoin if actions stop working",
-    Callback = function(v) mc.netTest = v == true end,
 })
 macroStatus = recSec:AddLabel({Text = "steps <b>0</b> | wave <b>0</b> | $<b>0</b>"})
 recSec:AddButton({

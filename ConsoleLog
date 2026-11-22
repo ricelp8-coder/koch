@@ -1,0 +1,313 @@
+if not game:IsLoaded() then game.Loaded:Wait() end
+local env = (getgenv and getgenv()) or _G
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local LogService = game:GetService("LogService")
+while not Players.LocalPlayer do task.wait() end
+local LocalPlayer = Players.LocalPlayer
+
+if env.__ConsoleLog and env.__ConsoleLog.Destroy then
+	pcall(env.__ConsoleLog.Destroy)
+end
+
+local MAX_STORED = 600
+local MAX_SHOWN = 150
+local FILE = "DiamondHub_ConsoleLog.txt"
+
+local State = { Entries = {}, Dirty = false, Filter = "", OnlyHub = true, ShowInfo = true, Paused = false }
+env.__ConsoleLog = State
+
+local NAVY = Color3.fromHex("0d1228")
+local ACCENT = Color3.fromHex("3d6bff")
+local OUTLINE = Color3.fromHex("1b2554")
+local TEXT = Color3.fromHex("eef2ff")
+local COLORS = {
+	[Enum.MessageType.MessageOutput] = Color3.fromHex("eef2ff"),
+	[Enum.MessageType.MessageInfo] = Color3.fromHex("8fb3ff"),
+	[Enum.MessageType.MessageWarning] = Color3.fromHex("ffc857"),
+	[Enum.MessageType.MessageError] = Color3.fromHex("ff6b6b"),
+}
+local TAGS = {
+	[Enum.MessageType.MessageOutput] = "OUT",
+	[Enum.MessageType.MessageInfo] = "INF",
+	[Enum.MessageType.MessageWarning] = "WRN",
+	[Enum.MessageType.MessageError] = "ERR",
+}
+
+local function isHub(msg)
+	return msg:find("[ld]", 1, true) or msg:find("[sd]", 1, true) or msg:find("[DiamondHub]", 1, true)
+		or msg:find("DiamondHub", 1, true)
+end
+
+local function push(msg, kind, stamp)
+	if State.Paused then return end
+	msg = tostring(msg)
+	table.insert(State.Entries, { Text = msg, Kind = kind, Time = stamp or os.date("%H:%M:%S") })
+	while #State.Entries > MAX_STORED do table.remove(State.Entries, 1) end
+	State.Dirty = true
+end
+
+pcall(function()
+	for _, h in ipairs(LogService:GetLogHistory()) do
+		local t = tonumber(h.timestamp)
+		push(h.message, h.messageType, t and os.date("%H:%M:%S", t) or "--:--:--")
+	end
+end)
+local conn = LogService.MessageOut:Connect(function(msg, kind) push(msg, kind) end)
+
+local function visibleEntries()
+	local out = {}
+	local f = State.Filter:lower()
+	for _, e in ipairs(State.Entries) do
+		local ok = true
+		if State.OnlyHub and not isHub(e.Text) then ok = false end
+		if ok and not State.ShowInfo and (e.Kind == Enum.MessageType.MessageOutput or e.Kind == Enum.MessageType.MessageInfo) then ok = false end
+		if ok and f ~= "" and not e.Text:lower():find(f, 1, true) then ok = false end
+		if ok then out[#out + 1] = e end
+	end
+	return out
+end
+
+local function asText(list)
+	local lines = {}
+	for _, e in ipairs(list) do
+		lines[#lines + 1] = string.format("%s [%s] %s", e.Time, TAGS[e.Kind] or "?", e.Text)
+	end
+	return table.concat(lines, "\n")
+end
+
+-- GUI
+local gui = Instance.new("ScreenGui")
+gui.Name = "DiamondUI_ConsoleLog"
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.DisplayOrder = 999
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+local parented = pcall(function()
+	gui.Parent = (type(gethui) == "function" and gethui()) or game:GetService("CoreGui")
+end)
+if not (parented and gui.Parent) then gui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+
+local cam = workspace.CurrentCamera
+local vs = cam and cam.ViewportSize or Vector2.new(800, 600)
+local W = math.min(560, vs.X - 20)
+local H = math.min(380, vs.Y - 60)
+
+local main = Instance.new("Frame")
+main.Size = UDim2.fromOffset(W, H)
+main.Position = UDim2.fromOffset(math.floor((vs.X - W) / 2), 40)
+main.BackgroundColor3 = NAVY
+main.BorderSizePixel = 0
+main.Active = true
+main.Parent = gui
+Instance.new("UICorner", main).CornerRadius = UDim.new(0, 8)
+local stroke = Instance.new("UIStroke", main)
+stroke.Color = OUTLINE
+stroke.Thickness = 1.5
+
+local top = Instance.new("TextLabel")
+top.Size = UDim2.new(1, -80, 0, 28)
+top.Position = UDim2.fromOffset(10, 0)
+top.BackgroundTransparency = 1
+top.Text = "Diamond Hub | Console Log"
+top.TextColor3 = TEXT
+top.Font = Enum.Font.GothamBold
+top.TextSize = 14
+top.TextXAlignment = Enum.TextXAlignment.Left
+top.Active = true
+top.Parent = main
+
+local function mkButton(text, x, y, w, parent)
+	local b = Instance.new("TextButton")
+	b.Size = UDim2.fromOffset(w, 24)
+	b.Position = UDim2.fromOffset(x, y)
+	b.BackgroundColor3 = OUTLINE
+	b.BorderSizePixel = 0
+	b.Text = text
+	b.TextColor3 = TEXT
+	b.Font = Enum.Font.GothamMedium
+	b.TextSize = 12
+	b.AutoButtonColor = true
+	b.Parent = parent or main
+	Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
+	return b
+end
+
+local closeBtn = mkButton("X", W - 34, 2, 28)
+local minBtn = mkButton("-", W - 66, 2, 28)
+
+local bar = Instance.new("Frame")
+bar.Size = UDim2.new(1, -16, 0, 56)
+bar.Position = UDim2.fromOffset(8, 30)
+bar.BackgroundTransparency = 1
+bar.Parent = main
+
+local search = Instance.new("TextBox")
+search.Size = UDim2.new(1, 0, 0, 24)
+search.BackgroundColor3 = Color3.fromHex("141b3a")
+search.BorderSizePixel = 0
+search.PlaceholderText = "filter text..."
+search.Text = ""
+search.ClearTextOnFocus = false
+search.TextColor3 = TEXT
+search.PlaceholderColor3 = Color3.fromHex("7a86b8")
+search.Font = Enum.Font.Gotham
+search.TextSize = 12
+search.TextXAlignment = Enum.TextXAlignment.Left
+search.Parent = bar
+Instance.new("UICorner", search).CornerRadius = UDim.new(0, 6)
+Instance.new("UIPadding", search).PaddingLeft = UDim.new(0, 6)
+
+local bw = math.floor((W - 16 - 5 * 4) / 6)
+local hubBtn = mkButton("Hub only: on", 0, 30, bw, bar)
+local infoBtn = mkButton("Output: on", (bw + 4), 30, bw, bar)
+local pauseBtn = mkButton("Pause", (bw + 4) * 2, 30, bw, bar)
+local copyBtn = mkButton("Copy", (bw + 4) * 3, 30, bw, bar)
+local saveBtn = mkButton("Save file", (bw + 4) * 4, 30, bw, bar)
+local clearBtn = mkButton("Clear", (bw + 4) * 5, 30, bw, bar)
+copyBtn.BackgroundColor3 = ACCENT
+
+local list = Instance.new("ScrollingFrame")
+list.Size = UDim2.new(1, -16, 1, -98)
+list.Position = UDim2.fromOffset(8, 90)
+list.BackgroundColor3 = Color3.fromHex("0a0f22")
+list.BorderSizePixel = 0
+list.ScrollBarThickness = 6
+list.CanvasSize = UDim2.new()
+list.AutomaticCanvasSize = Enum.AutomaticSize.Y
+list.Parent = main
+Instance.new("UICorner", list).CornerRadius = UDim.new(0, 6)
+local layout = Instance.new("UIListLayout", list)
+layout.SortOrder = Enum.SortOrder.LayoutOrder
+layout.Padding = UDim.new(0, 2)
+local pad = Instance.new("UIPadding", list)
+pad.PaddingLeft = UDim.new(0, 6)
+pad.PaddingRight = UDim.new(0, 6)
+pad.PaddingTop = UDim.new(0, 4)
+
+local function toast(text)
+	top.Text = "Diamond Hub | " .. text
+	task.delay(2, function()
+		if top.Parent then top.Text = "Diamond Hub | Console Log" end
+	end)
+end
+
+-- drag (mouse and touch)
+do
+	local dragging, startPos, startInput
+	top.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging, startPos, startInput = true, main.Position, input.Position
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then dragging = false end
+			end)
+		end
+	end)
+	UIS.InputChanged:Connect(function(input)
+		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+			local d = input.Position - startInput
+			main.Position = UDim2.fromOffset(startPos.X.Offset + d.X, startPos.Y.Offset + d.Y)
+		end
+	end)
+end
+
+local minimized = false
+minBtn.Activated:Connect(function()
+	minimized = not minimized
+	bar.Visible = not minimized
+	list.Visible = not minimized
+	main.Size = minimized and UDim2.fromOffset(W, 30) or UDim2.fromOffset(W, H)
+	minBtn.Text = minimized and "+" or "-"
+end)
+hubBtn.Activated:Connect(function()
+	State.OnlyHub = not State.OnlyHub
+	hubBtn.Text = "Hub only: " .. (State.OnlyHub and "on" or "off")
+	State.Dirty = true
+end)
+infoBtn.Activated:Connect(function()
+	State.ShowInfo = not State.ShowInfo
+	infoBtn.Text = "Output: " .. (State.ShowInfo and "on" or "off")
+	State.Dirty = true
+end)
+pauseBtn.Activated:Connect(function()
+	State.Paused = not State.Paused
+	pauseBtn.Text = State.Paused and "Resume" or "Pause"
+end)
+clearBtn.Activated:Connect(function()
+	State.Entries = {}
+	State.Dirty = true
+end)
+search:GetPropertyChangedSignal("Text"):Connect(function()
+	State.Filter = search.Text
+	State.Dirty = true
+end)
+copyBtn.Activated:Connect(function()
+	local text = asText(visibleEntries())
+	local set = setclipboard or toclipboard or (syn and syn.write_clipboard)
+	if type(set) == "function" and pcall(set, text) then
+		toast("copied " .. #visibleEntries() .. " lines")
+	else
+		toast("clipboard not supported, use Save file")
+	end
+end)
+saveBtn.Activated:Connect(function()
+	if type(writefile) == "function" and pcall(writefile, FILE, asText(visibleEntries())) then
+		toast("saved to workspace/" .. FILE)
+	else
+		toast("writefile not supported")
+	end
+end)
+
+local rows = {}
+local function render()
+	local shown = visibleEntries()
+	local from = math.max(1, #shown - MAX_SHOWN + 1)
+	local n = 0
+	for i = from, #shown do
+		n = n + 1
+		local e = shown[i]
+		local row = rows[n]
+		if not row then
+			row = Instance.new("TextBox")
+			row.BackgroundTransparency = 1
+			row.Size = UDim2.new(1, 0, 0, 0)
+			row.AutomaticSize = Enum.AutomaticSize.Y
+			row.TextWrapped = true
+			row.TextEditable = false
+			row.ClearTextOnFocus = false
+			row.Font = Enum.Font.Code
+			row.TextSize = 12
+			row.TextXAlignment = Enum.TextXAlignment.Left
+			row.TextYAlignment = Enum.TextYAlignment.Top
+			row.Parent = list
+			rows[n] = row
+		end
+		row.LayoutOrder = n
+		row.Text = string.format("%s [%s] %s", e.Time, TAGS[e.Kind] or "?", e.Text)
+		row.TextColor3 = COLORS[e.Kind] or TEXT
+		row.Visible = true
+	end
+	for i = n + 1, #rows do rows[i].Visible = false end
+	task.defer(function()
+		list.CanvasPosition = Vector2.new(0, math.max(0, list.AbsoluteCanvasSize.Y - list.AbsoluteWindowSize.Y))
+	end)
+end
+
+local alive = true
+function State.Destroy()
+	alive = false
+	pcall(function() conn:Disconnect() end)
+	pcall(function() gui:Destroy() end)
+end
+closeBtn.Activated:Connect(State.Destroy)
+
+task.spawn(function()
+	while alive do
+		if State.Dirty then
+			State.Dirty = false
+			pcall(render)
+		end
+		task.wait(0.3)
+	end
+end)
+State.Dirty = true

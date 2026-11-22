@@ -1,6 +1,6 @@
 # koch
 
-Roblox Luau scripts (Cameraman_TD, Sorcerer_TD, Doors, Dumper, RemoteLog) plus the UI libraries in `UI/`.
+Roblox Luau scripts (Cameraman_TD, Sorcerer_TD, Legacy_TD, Doors, Dumper, RemoteLog, ConsoleLog) plus the UI libraries in `UI/`.
 Game scripts have no file extension; the loader in the diamondHub repo maps `game.GameId` to a file here.
 
 ## Defaults
