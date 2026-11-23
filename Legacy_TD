@@ -2950,6 +2950,28 @@ function NET.send(net)
     end)
     return ok, err
 end
+-- place event as the game sends it: id "2", args {unit name, point, hotbar slot}. Works for old macros too;
+-- an id saved by a newer recording wins over the default
+function NET.place(s, p)
+    local r = NET.remote()
+    if not r then return false, "dataRemoteEvent not found" end
+    local id, slot = "2", GU.slotOf(s.n)
+    local net = s.net
+    if type(net) == "table" and type(net.id) == "string" then
+        id = net.id
+        if not slot then
+            local okA, a = pcall(NET.unpack, net.a)
+            if okA and type(a) == "table" then slot = a[3] end
+        end
+    end
+    local args = {s.n, p, slot or 1}
+    if not NET.placeLogged then
+        NET.placeLogged = true
+        warn(string.format("[ld] net place: id %s args {%s, %.1f,%.1f,%.1f, %s}", id, tostring(s.n), p.X, p.Y, p.Z, tostring(slot or 1)))
+    end
+    local ok, err = pcall(function() r:FireServer({args, id}) end)
+    return ok, err
+end
 local MX = {}
 function MX.byKey(key)
     local pos = key and mc.k2pos[key]
@@ -3091,8 +3113,8 @@ function MX.place(s, myMatch)
         local before = money()
         local calledAt = os.clock()
         local sent, why
-        if s.net and cfg.netPlace ~= false and NET.fails < 3 then
-            sent, why = NET.send(s.net)
+        if cfg.netPlace ~= false and NET.fails < 3 then
+            sent, why = NET.place(s, p)
             if sent then
                 NET.viaNet = true
             else
