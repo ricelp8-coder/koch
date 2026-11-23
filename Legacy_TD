@@ -918,7 +918,7 @@ local function flash(t, kind)
     UI:Notify({Title = "Diamond Hub", Content = t, Duration = 2.5, Type = kind or "Info"})
 end
 -- bump on every push: the first log line tells which file the executor got from GitHub
-warn("[ld] build net5" .. (genv.__ldNetHooked and " | a __namecall hook from an older build is still active: rejoin the game" or ""))
+warn("[ld] build net6" .. (genv.__ldNetHooked and " | a __namecall hook from an older build is still active: rejoin the game" or ""))
 if genv.__ldNetHooked then
     task.delay(6, function()
         UI:Notify({Title = "Diamond Hub", Content = "An older build left a hook that blocks placing: leave and rejoin the game", Duration = 10, Type = "Warning"})
@@ -2752,8 +2752,7 @@ local function recordStep(kind, key, pos, stamp, extra)
 end
 local function a2v(a) return Vector3.new(a[1], a[2], a[3]) end
 local function recording() return mc.rec and not mc.playing end
--- NET: BridgeNet2's dataRemoteEvent. The __namecall copy (NET.hook) is not used anymore: with it installed the game
--- stopped accepting placements. Playback builds the place event itself (NET.place)
+-- NET: BridgeNet2's dataRemoteEvent. Record copies the game's own place event (NET.hook), playback sends it (NET.place)
 local NET = {log = {}, dumped = 0, fails = 0}
 function NET.remote()
     if NET.r and NET.r.Parent then return NET.r end
@@ -2854,8 +2853,7 @@ function NET.idNames()
     warn("[ld] net ids (" .. #found .. "): " .. table.concat(found, " ", 1, math.min(#found, 80)))
     return NET.names
 end
-function NET.onSend(n, ...)
-    local batch = (...)
+function NET.onSend(batch)
     if type(batch) ~= "table" then return end
     NET.printed = NET.printed or {}
     local names = NET.idNames()
@@ -2880,34 +2878,62 @@ function NET.onSend(n, ...)
         end
     end
 end
+-- the hook must not make any namecall of its own before old(self, ...): a nested namecall (JSONEncode,
+-- GetAttributes...) replaces the pending method, so FireServer ran as something else and the game's own
+-- placements never reached the server. Here it only clones the batch and works on it later
 function NET.hook()
     if NET.hooked ~= nil then return NET.hooked end
     NET.hooked = false
-    genv.__ldNet = NET
+    local r = NET.remote()
+    if not r then
+        warn("[ld] net: dataRemoteEvent not found, place events are not recorded")
+        return false
+    end
     NET.idNames()
-    if genv.__ldNetHooked then
+    genv.__ldNet = NET
+    if genv.__ldNetSafeHook then
         NET.hooked = true
         return true
     end
     if not (hookmetamethod and getnamecallmethod and newcclosure) then
-        warn("[ld] net: hookmetamethod is missing, place packets are not recorded")
+        warn("[ld] net: hookmetamethod is missing, place events are not recorded")
         return false
     end
     local old
     local ok, err = pcall(function()
         old = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
             local sink = genv.__ldNet
-            if sink and sink.on and typeof(self) == "Instance" and self.Name == "dataRemoteEvent"
-                and getnamecallmethod() == "FireServer" and not (checkcaller and checkcaller()) then
-                pcall(sink.onSend, select("#", ...), ...)
+            if sink and sink.on and rawequal(self, sink.r) and not (checkcaller and checkcaller()) then
+                local method = getnamecallmethod()
+                local b = (...)
+                if method == "FireServer" and type(b) == "table" then
+                    task.defer(sink.onSend, table.clone(b))
+                end
             end
             return old(self, ...)
         end))
     end)
     if not ok then warn("[ld] net hook failed: " .. tostring(err)) end
-    genv.__ldNetHooked = ok
+    genv.__ldNetSafeHook = ok
     NET.hooked = ok
     return ok
+end
+-- what the server sends back right after a place try (an error text, a refusal) is printed for a few seconds
+function NET.listen()
+    if NET.listening then return end
+    local r = NET.remote()
+    if not r then return end
+    NET.listening = true
+    NET.inSeen = {}
+    r.OnClientEvent:Connect(function(...)
+        if not alive() or not NET.listenUntil or os.clock() > NET.listenUntil then return end
+        local ok, pa = pcall(NET.packArgs, select("#", ...), ...)
+        if not ok then return end
+        local text = NET.text(pa)
+        if NET.inSeen[text] then return end
+        NET.inSeen[text] = true
+        warn("[ld] net in " .. text)
+    end)
 end
 local function nearIn(v, pos, depth)
     if type(v) ~= "table" or depth > 12 then return false end
@@ -2961,7 +2987,7 @@ end
 -- known yet, and the game may want its "o" event in the same batch, so the variants are tried in turn; the first one
 -- that makes a unit appear is kept for the session
 NET.variants = {
-    {third = "one"}, {third = "one", pre = true}, {third = "slot"}, {third = "slot", pre = true},
+    {third = "rec"}, {third = "one"}, {third = "one", pre = true}, {third = "slot"}, {third = "slot", pre = true},
     {third = "none"}, {third = "none", pre = true},
 }
 function NET.place(s, p)
@@ -2974,7 +3000,13 @@ function NET.place(s, p)
     local id = "2"
     if type(s.net) == "table" and type(s.net.id) == "string" then id = s.net.id end
     local args
-    if v.third == "one" then
+    if v.third == "rec" and type(s.net) == "table" and s.net.a then
+        local okA, a = pcall(NET.unpack, s.net.a)
+        if okA and type(a) == "table" then args = a end
+    end
+    if args then
+        -- recorded as sent by the game
+    elseif v.third == "one" or v.third == "rec" then
         args = {s.n, p, 1}
     elseif v.third == "slot" then
         args = {s.n, p, GU.slotOf(s.n) or 1}
@@ -2984,6 +3016,8 @@ function NET.place(s, p)
     local batch = v.pre and {{}, "o", args, id} or {args, id}
     warn(string.format("[ld] net place try %d: id %s {%s, %.1f,%.1f,%.1f, %s}%s", idx, id, tostring(s.n),
         p.X, p.Y, p.Z, tostring(args[3]), v.pre and " after o" or ""))
+    NET.listen()
+    NET.listenUntil = os.clock() + 3
     local ok, err = pcall(function() r:FireServer(batch) end)
     return ok, err
 end
@@ -3985,6 +4019,7 @@ recToggle = recGrid:AddToggle({
                 return
             end
             mc.hook = true
+            if cfg.netPlace ~= false and NET.hook() then NET.on = true end
             resetRecorder()
             mc.map = currentMap()
             mc.rec = true
@@ -4610,7 +4645,7 @@ local miscTab = Win:AddTab("Misc", {Icon = "wrench"})
 local miscSec = miscTab:AddSection(nil)
 miscSec:AddToggle({
     Name = "Remote Placement", Flag = "netPlace", Default = true,
-    Tooltip = "Play Macro places units by sending the game's place event instead of tapping the screen. Turn off to go back to tapping",
+    Tooltip = "Record copies the place event the game sends; Play Macro sends place events instead of tapping the screen. Turn off if placing by hand breaks while recording",
     Callback = function(v)
         cfg.netPlace = v
         if not v then NET.on = false end
