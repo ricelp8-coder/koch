@@ -918,7 +918,7 @@ local function flash(t, kind)
     UI:Notify({Title = "Diamond Hub", Content = t, Duration = 2.5, Type = kind or "Info"})
 end
 -- bump on every push: the first log line tells which file the executor got from GitHub
-warn("[ld] build net4" .. (genv.__ldNetHooked and " | a __namecall hook from an older build is still active: rejoin the game" or ""))
+warn("[ld] build net5" .. (genv.__ldNetHooked and " | a __namecall hook from an older build is still active: rejoin the game" or ""))
 if genv.__ldNetHooked then
     task.delay(6, function()
         UI:Notify({Title = "Diamond Hub", Content = "An older build left a hook that blocks placing: leave and rejoin the game", Duration = 10, Type = "Warning"})
@@ -2957,26 +2957,34 @@ function NET.send(net)
     end)
     return ok, err
 end
--- place event as the game sends it: id "2", args {unit name, point, hotbar slot}. Works for old macros too;
--- an id saved by a newer recording wins over the default
+-- place event as the game sends it: id "2", args {unit name, point, n}. What n is (rotation, slot, count) is not
+-- known yet, and the game may want its "o" event in the same batch, so the variants are tried in turn; the first one
+-- that makes a unit appear is kept for the session
+NET.variants = {
+    {third = "one"}, {third = "one", pre = true}, {third = "slot"}, {third = "slot", pre = true},
+    {third = "none"}, {third = "none", pre = true},
+}
 function NET.place(s, p)
     local r = NET.remote()
     if not r then return false, "dataRemoteEvent not found" end
-    local id, slot = "2", GU.slotOf(s.n)
-    local net = s.net
-    if type(net) == "table" and type(net.id) == "string" then
-        id = net.id
-        if not slot then
-            local okA, a = pcall(NET.unpack, net.a)
-            if okA and type(a) == "table" then slot = a[3] end
-        end
+    local idx = NET.way or (NET.fails + 1)
+    local v = NET.variants[idx]
+    if not v then return false, "no variants left" end
+    NET.cur = idx
+    local id = "2"
+    if type(s.net) == "table" and type(s.net.id) == "string" then id = s.net.id end
+    local args
+    if v.third == "one" then
+        args = {s.n, p, 1}
+    elseif v.third == "slot" then
+        args = {s.n, p, GU.slotOf(s.n) or 1}
+    else
+        args = {s.n, p}
     end
-    local args = {s.n, p, slot or 1}
-    if not NET.placeLogged then
-        NET.placeLogged = true
-        warn(string.format("[ld] net place: id %s args {%s, %.1f,%.1f,%.1f, %s}", id, tostring(s.n), p.X, p.Y, p.Z, tostring(slot or 1)))
-    end
-    local ok, err = pcall(function() r:FireServer({args, id}) end)
+    local batch = v.pre and {{}, "o", args, id} or {args, id}
+    warn(string.format("[ld] net place try %d: id %s {%s, %.1f,%.1f,%.1f, %s}%s", idx, id, tostring(s.n),
+        p.X, p.Y, p.Z, tostring(args[3]), v.pre and " after o" or ""))
+    local ok, err = pcall(function() r:FireServer(batch) end)
     return ok, err
 end
 local MX = {}
@@ -3120,16 +3128,23 @@ function MX.place(s, myMatch)
         local before = money()
         local calledAt = os.clock()
         local sent, why
-        if cfg.netPlace ~= false and NET.fails < 3 then
+        NET.viaNet = false
+        if cfg.netPlace ~= false then
+            -- no tap fallback here: the tapping path crashes the game on phones
+            if not NET.way and NET.fails >= #NET.variants then
+                if not NET.gaveUp then
+                    NET.gaveUp = true
+                    flash("Remote placement: no variant worked, placing is stopped. Send the [ld] net lines", "Error")
+                end
+                return false
+            end
             sent, why = NET.place(s, p)
             if sent then
                 NET.viaNet = true
             else
                 warn("[ld] net place " .. tostring(s.n) .. " failed: " .. tostring(why))
             end
-        end
-        if not sent then
-            NET.viaNet = false
+        else
             sent, why = GU.place(s.n, p)
         end
         if not sent and why == "not in hotbar" then
@@ -3155,7 +3170,11 @@ function MX.place(s, myMatch)
             end, 3.5, myMatch, 0.03)
         end
         if nm then
-            if NET.viaNet then NET.fails = 0 end
+            if NET.viaNet and not NET.way then
+                NET.way = NET.cur
+                warn("[ld] net place works with variant " .. NET.cur)
+                flash("Remote placement works (variant " .. NET.cur .. ")", "Success")
+            end
             mc.claim[nm] = true
             MX.reserve(before, price)
             local live = TW.pos(nm) or ne.pos
@@ -3167,9 +3186,9 @@ function MX.place(s, myMatch)
             return true, nm
         end
         mc.spend = nil
-        if NET.viaNet and money() >= price then
+        if NET.viaNet and money() >= price and not NET.way then
             NET.fails = NET.fails + 1
-            warn("[ld] net place " .. tostring(s.n) .. ": the packet was sent but no unit appeared (" .. NET.fails .. "/3)")
+            warn("[ld] net place " .. tostring(s.n) .. ": variant " .. NET.cur .. " sent, no unit appeared (" .. NET.fails .. "/" .. #NET.variants .. ")")
         end
         GU.stopPlacing()
         if money() < price then
