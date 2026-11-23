@@ -1344,6 +1344,7 @@ function GU.placeNow(name, pos)
         cam.CFrame = hold
         task.wait()
         task.wait()
+        GU.inputSnap = GU.snapInput()
         if not GU.press(btn) then error("slot press failed", 0) end
         local t0 = os.clock()
         while not started and os.clock() - t0 < 0.6 do task.wait() end
@@ -1455,6 +1456,29 @@ function GU.gameFn(f)
     end
     return false
 end
+function GU.inputSignals()
+    local ms = lp:GetMouse()
+    return {
+        InputBegan = UIS.InputBegan, InputEnded = UIS.InputEnded, TouchEnded = UIS.TouchEnded,
+        TouchTapInWorld = UIS.TouchTapInWorld, Button1Down = ms.Button1Down, Button1Up = ms.Button1Up,
+    }
+end
+function GU.snapInput()
+    local snap = {}
+    if type(getconnections) ~= "function" then return snap end
+    for name, sig in pairs(GU.inputSignals()) do
+        local set = {}
+        local ok, cs = pcall(getconnections, sig)
+        if ok and type(cs) == "table" then
+            for _, c in ipairs(cs) do
+                local okf, f = pcall(function() return c.Function end)
+                if okf and type(f) == "function" then set[f] = true end
+            end
+        end
+        snap[name] = set
+    end
+    return snap
+end
 function GU.feedPlacementInput(done)
     if type(getconnections) ~= "function" then error("no getconnections in this executor", 0) end
     local ms = lp:GetMouse()
@@ -1463,24 +1487,30 @@ function GU.feedPlacementInput(done)
         return {UserInputType = kind, UserInputState = state, KeyCode = Enum.KeyCode.Unknown, Position = at, Delta = Vector3.zero}
     end
     local plan = {
-        {UIS.InputBegan, function() return fake(Enum.UserInputType.MouseButton1, Enum.UserInputState.Begin), false end},
-        {UIS.InputEnded, function() return fake(Enum.UserInputType.MouseButton1, Enum.UserInputState.End), false end},
-        {ms.Button1Down, function() end},
-        {ms.Button1Up, function() end},
-        {UIS.InputBegan, function() return fake(Enum.UserInputType.Touch, Enum.UserInputState.Begin), false end},
-        {UIS.InputEnded, function() return fake(Enum.UserInputType.Touch, Enum.UserInputState.End), false end},
-        {UIS.TouchTapInWorld, function() return Vector2.new(at.X, at.Y), false end},
-        {UIS.TouchEnded, function() return fake(Enum.UserInputType.Touch, Enum.UserInputState.End), false end},
+        {"InputBegan", function() return fake(Enum.UserInputType.MouseButton1, Enum.UserInputState.Begin), false end},
+        {"InputEnded", function() return fake(Enum.UserInputType.MouseButton1, Enum.UserInputState.End), false end},
+        {"Button1Down", function() end},
+        {"Button1Up", function() end},
+        {"InputBegan", function() return fake(Enum.UserInputType.Touch, Enum.UserInputState.Begin), false end},
+        {"InputEnded", function() return fake(Enum.UserInputType.Touch, Enum.UserInputState.End), false end},
+        {"TouchTapInWorld", function() return Vector2.new(at.X, at.Y), false end},
+        {"TouchEnded", function() return fake(Enum.UserInputType.Touch, Enum.UserInputState.End), false end},
     }
+    local sigs = GU.inputSignals()
+    local snap = GU.inputSnap or {}
     local fired, report = 0, {}
     for i, step in ipairs(plan) do
-        local ok, cs = pcall(getconnections, step[1])
+        local ok, cs = pcall(getconnections, sigs[step[1]])
+        local before = snap[step[1]]
         local total, mine = 0, 0
         if ok and type(cs) == "table" then
             total = #cs
             for _, c in ipairs(cs) do
                 local okf, f = pcall(function() return c.Function end)
-                if okf and GU.gameFn(f) then
+                -- a handler connected by the slot press (the placement module connects on Start), or one the
+                -- framework owns
+                local fresh = okf and type(f) == "function" and before ~= nil and not before[f]
+                if okf and (fresh or GU.gameFn(f)) then
                     mine = mine + 1
                     fired = fired + 1
                     task.spawn(function() pcall(f, step[2]()) end)
