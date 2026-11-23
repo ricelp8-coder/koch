@@ -2745,6 +2745,178 @@ local function recordStep(kind, key, pos, stamp, extra)
 end
 local function a2v(a) return Vector3.new(a[1], a[2], a[3]) end
 local function recording() return mc.rec and not mc.playing end
+-- NET: a passive copy of what the game itself sends through BridgeNet2's dataRemoteEvent while recording.
+-- nothing in the framework is called or hooked; a recorded place packet is fired again as is on playback
+local NET = {log = {}, dumped = 0, fails = 0}
+function NET.remote()
+    if NET.r and NET.r.Parent then return NET.r end
+    local r = RS:FindFirstChild("dataRemoteEvent", true)
+    if r and r:IsA("RemoteEvent") then NET.r = r end
+    return NET.r
+end
+local function hex(s)
+    return (s:gsub(".", function(c) return string.format("%02x", c:byte()) end))
+end
+local function unhex(h)
+    return (h:gsub("..", function(b) return string.char(tonumber(b, 16)) end))
+end
+function NET.pack(v, depth)
+    depth = depth or 0
+    if depth > 12 then error("too deep") end
+    local t = typeof(v)
+    if t == "number" or t == "boolean" then return v end
+    if t == "string" then
+        if v:find("[^\32-\126]") then return {_h = hex(v)} end
+        return v
+    end
+    if t == "nil" then return {_n = true} end
+    if t == "Vector3" then return {_v = {v.X, v.Y, v.Z}} end
+    if t == "Vector2" then return {_v2 = {v.X, v.Y}} end
+    if t == "CFrame" then return {_c = {v:GetComponents()}} end
+    if t == "EnumItem" then return {_e = tostring(v)} end
+    if t == "buffer" then return {_buf = hex(buffer.tostring(v))} end
+    if t == "Instance" then return {_i = v:GetFullName()} end
+    if t == "table" then
+        local out = {}
+        for k, x in pairs(v) do table.insert(out, {NET.pack(k, depth + 1), NET.pack(x, depth + 1)}) end
+        return {_t = out}
+    end
+    error("cannot copy " .. t)
+end
+local function findPath(path)
+    local cur = game
+    for part in string.gmatch(path, "[^%.]+") do
+        cur = cur and cur:FindFirstChild(part)
+    end
+    return cur
+end
+function NET.unpack(v)
+    if type(v) ~= "table" then return v end
+    if v._n then return nil end
+    if v._h then return unhex(v._h) end
+    if v._v then return Vector3.new(v._v[1], v._v[2], v._v[3]) end
+    if v._v2 then return Vector2.new(v._v2[1], v._v2[2]) end
+    if v._c then return CFrame.new(table.unpack(v._c)) end
+    if v._buf then return buffer.fromstring(unhex(v._buf)) end
+    if v._e then
+        local en, item = v._e:match("^Enum%.(%w+)%.(%w+)$")
+        return en and Enum[en][item]
+    end
+    if v._i then
+        local inst = findPath(v._i)
+        if not inst then error("missing " .. v._i) end
+        return inst
+    end
+    if v._t then
+        local out = {}
+        for _, kv in ipairs(v._t) do
+            local k = NET.unpack(kv[1])
+            if k ~= nil then out[k] = NET.unpack(kv[2]) end
+        end
+        return out
+    end
+    return v
+end
+function NET.packArgs(n, ...)
+    local a = {n = n}
+    for i = 1, n do a[i] = NET.pack((select(i, ...))) end
+    return a
+end
+function NET.text(a)
+    local ok, s = pcall(function() return HttpService:JSONEncode(a) end)
+    s = ok and s or "?"
+    if #s > 700 then s = s:sub(1, 700) .. "..." end
+    return s
+end
+function NET.onSend(n, ...)
+    local ok, a = pcall(NET.packArgs, n, ...)
+    if not ok then
+        if NET.dumped < 12 then
+            NET.dumped = NET.dumped + 1
+            warn("[ld] net send not copied: " .. tostring(a))
+        end
+        return
+    end
+    table.insert(NET.log, {at = os.clock(), a = a})
+    if #NET.log > 60 then table.remove(NET.log, 1) end
+    if NET.dumped < 12 then
+        NET.dumped = NET.dumped + 1
+        warn("[ld] net send " .. NET.text(a))
+    end
+end
+function NET.hook()
+    if NET.hooked ~= nil then return NET.hooked end
+    NET.hooked = false
+    genv.__ldNet = NET
+    if genv.__ldNetHooked then
+        NET.hooked = true
+        return true
+    end
+    if not (hookmetamethod and getnamecallmethod and newcclosure) then
+        warn("[ld] net: hookmetamethod is missing, place packets are not recorded")
+        return false
+    end
+    local old
+    local ok, err = pcall(function()
+        old = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+            local sink = genv.__ldNet
+            if sink and sink.on and typeof(self) == "Instance" and self.Name == "dataRemoteEvent"
+                and getnamecallmethod() == "FireServer" and not (checkcaller and checkcaller()) then
+                pcall(sink.onSend, select("#", ...), ...)
+            end
+            return old(self, ...)
+        end))
+    end)
+    if not ok then warn("[ld] net hook failed: " .. tostring(err)) end
+    genv.__ldNetHooked = ok
+    NET.hooked = ok
+    return ok
+end
+local function nearIn(v, pos, depth)
+    if type(v) ~= "table" or depth > 12 then return false end
+    local c = v._v or v._c
+    if c and type(c[1]) == "number" then
+        return xzDist(Vector3.new(c[1], c[2], c[3]), pos) < 4
+    end
+    if v._t then
+        for _, kv in ipairs(v._t) do
+            if nearIn(kv[2], pos, depth + 1) then return true end
+        end
+    else
+        for _, x in ipairs(v) do
+            if nearIn(x, pos, depth + 1) then return true end
+        end
+    end
+    return false
+end
+-- the newest packet of the last few seconds that carries a point next to the new unit
+function NET.findPlace(pos)
+    local since = os.clock() - 5
+    for i = #NET.log, 1, -1 do
+        local e = NET.log[i]
+        if e.at < since then break end
+        if not e.used and nearIn(e.a, pos, 0) then
+            e.used = true
+            return e.a
+        end
+    end
+    if NET.hooked and NET.missWarn ~= true then
+        NET.missWarn = true
+        warn("[ld] net: no sent packet carries the point of the new unit; last sends:")
+        for i = math.max(1, #NET.log - 3), #NET.log do warn("[ld]   " .. NET.text(NET.log[i].a)) end
+    end
+    return nil
+end
+function NET.send(packed)
+    local r = NET.remote()
+    if not r then return false, "dataRemoteEvent not found" end
+    local ok, err = pcall(function()
+        local a = {}
+        for i = 1, packed.n or #packed do a[i] = NET.unpack(packed[i]) end
+        r:FireServer(table.unpack(a, 1, packed.n or #packed))
+    end)
+    return ok, err
+end
 local MX = {}
 function MX.byKey(key)
     local pos = key and mc.k2pos[key]
@@ -2756,7 +2928,8 @@ mc.cb.place = function(m, e)
     if not recording() then return end
     mc.keyN = mc.keyN + 1
     e.key = "T" .. mc.keyN
-    recordStep("place", e.key, e.pos, nil, {n = e.name, c = TW.placePrice(e.name)})
+    local net = NET.hooked and NET.findPlace(e.pos) or nil
+    recordStep("place", e.key, e.pos, nil, {n = e.name, c = TW.placePrice(e.name), net = net})
     for lv = 2, tonumber(e.lv) or 1 do
         recordStep("upgrade", e.key, e.pos, nil, {n = e.name, lv = lv, c = TW.priceAt(e.name, lv)})
     end
@@ -2884,7 +3057,19 @@ function MX.place(s, myMatch)
         end
         local before = money()
         local calledAt = os.clock()
-        local sent, why = GU.place(s.n, p)
+        local sent, why
+        if s.net and cfg.netPlace ~= false and NET.fails < 3 then
+            sent, why = NET.send(s.net)
+            if sent then
+                NET.viaNet = true
+            else
+                warn("[ld] net place " .. tostring(s.n) .. " failed: " .. tostring(why))
+            end
+        end
+        if not sent then
+            NET.viaNet = false
+            sent, why = GU.place(s.n, p)
+        end
         if not sent and why == "not in hotbar" then
             if not mc.warnedHotbar[s.n] then
                 mc.warnedHotbar[s.n] = true
@@ -2908,6 +3093,7 @@ function MX.place(s, myMatch)
             end, 3.5, myMatch, 0.03)
         end
         if nm then
+            if NET.viaNet then NET.fails = 0 end
             mc.claim[nm] = true
             MX.reserve(before, price)
             local live = TW.pos(nm) or ne.pos
@@ -2919,6 +3105,10 @@ function MX.place(s, myMatch)
             return true, nm
         end
         mc.spend = nil
+        if NET.viaNet and money() >= price then
+            NET.fails = NET.fails + 1
+            warn("[ld] net place " .. tostring(s.n) .. ": the packet was sent but no unit appeared (" .. NET.fails .. "/3)")
+        end
         GU.stopPlacing()
         if money() < price then
             moneyFails = moneyFails + 1
@@ -3714,6 +3904,7 @@ recToggle = recGrid:AddToggle({
                 return
             end
             mc.hook = true
+            if cfg.netPlace ~= false and NET.hook() then NET.on = true end
             resetRecorder()
             mc.map = currentMap()
             mc.rec = true
@@ -4337,6 +4528,14 @@ function MISC.noFog(on)
 end
 local miscTab = Win:AddTab("Misc", {Icon = "wrench"})
 local miscSec = miscTab:AddSection(nil)
+miscSec:AddToggle({
+    Name = "Remote Placement", Flag = "netPlace", Default = true,
+    Tooltip = "Record copies the packet the game sends when you place a unit; Play Macro sends it again instead of tapping the screen. Turn off if placing breaks, then record again",
+    Callback = function(v)
+        cfg.netPlace = v
+        if not v then NET.on = false end
+    end,
+})
 miscSec:AddToggle({
     Name = "Anti AFK", Flag = "antiAfk", Tooltip = "Stops the game from kicking you for being idle",
     Callback = function(v) MISC.antiAfk(v) end,
