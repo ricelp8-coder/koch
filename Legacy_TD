@@ -2745,8 +2745,8 @@ local function recordStep(kind, key, pos, stamp, extra)
 end
 local function a2v(a) return Vector3.new(a[1], a[2], a[3]) end
 local function recording() return mc.rec and not mc.playing end
--- NET: a passive copy of what the game itself sends through BridgeNet2's dataRemoteEvent while recording.
--- nothing in the framework is called or hooked; a recorded place packet is fired again as is on playback
+-- NET: BridgeNet2's dataRemoteEvent. The __namecall copy (NET.hook) is not used anymore: with it installed the game
+-- stopped accepting placements. Playback builds the place event itself (NET.place)
 local NET = {log = {}, dumped = 0, fails = 0}
 function NET.remote()
     if NET.r and NET.r.Parent then return NET.r end
@@ -3959,7 +3959,6 @@ recToggle = recGrid:AddToggle({
                 return
             end
             mc.hook = true
-            if cfg.netPlace ~= false and NET.hook() then NET.on = true end
             resetRecorder()
             mc.map = currentMap()
             mc.rec = true
@@ -4585,7 +4584,7 @@ local miscTab = Win:AddTab("Misc", {Icon = "wrench"})
 local miscSec = miscTab:AddSection(nil)
 miscSec:AddToggle({
     Name = "Remote Placement", Flag = "netPlace", Default = true,
-    Tooltip = "Record copies the packet the game sends when you place a unit; Play Macro sends it again instead of tapping the screen. Turn off if placing breaks, then record again",
+    Tooltip = "Play Macro places units by sending the game's place event instead of tapping the screen. Turn off to go back to tapping",
     Callback = function(v)
         cfg.netPlace = v
         if not v then NET.on = false end
