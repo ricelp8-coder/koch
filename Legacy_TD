@@ -917,6 +917,13 @@ local function flash(t, kind)
     if UI.__booting then return end
     UI:Notify({Title = "Diamond Hub", Content = t, Duration = 2.5, Type = kind or "Info"})
 end
+-- bump on every push: the first log line tells which file the executor got from GitHub
+warn("[ld] build net4" .. (genv.__ldNetHooked and " | a __namecall hook from an older build is still active: rejoin the game" or ""))
+if genv.__ldNetHooked then
+    task.delay(6, function()
+        UI:Notify({Title = "Diamond Hub", Content = "An older build left a hook that blocks placing: leave and rejoin the game", Duration = 10, Type = "Warning"})
+    end)
+end
 local function visible(o)
     while o and o ~= game do
         if o:IsA("LayerCollector") and not o.Enabled then return false end
