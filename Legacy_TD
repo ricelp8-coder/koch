@@ -2828,33 +2828,56 @@ function NET.text(a)
     if #s > 700 then s = s:sub(1, 700) .. "..." end
     return s
 end
-function NET.onSend(n, ...)
-    local ok, a = pcall(NET.packArgs, n, ...)
-    if not ok then
-        if NET.dumped < 12 then
-            NET.dumped = NET.dumped + 1
-            warn("[ld] net send not copied: " .. tostring(a))
+-- BridgeNet2 sends one batch per frame: {args1, id1, args2, id2, ...}; ids are short strings
+function NET.idNames()
+    if NET.names then return NET.names end
+    NET.names = {}
+    local found = {}
+    pcall(function()
+        for _, d in ipairs(RS:GetDescendants()) do
+            for k, v in pairs(d:GetAttributes()) do
+                if type(v) == "string" and #v <= 2 then
+                    NET.names[v] = k
+                    table.insert(found, v .. "=" .. k)
+                end
+            end
         end
-        return
-    end
-    local text = NET.text(a)
-    -- the same packet every frame (a heartbeat) is not kept and printed once
-    if text == NET.lastText then return end
-    NET.lastText = text
-    NET.seen = NET.seen or {}
-    if NET.seen[text] then return end
-    NET.seen[text] = true
-    table.insert(NET.log, {at = os.clock(), a = a})
-    if #NET.log > 60 then table.remove(NET.log, 1) end
-    if NET.dumped < 30 then
-        NET.dumped = NET.dumped + 1
-        warn("[ld] net send " .. text)
+    end)
+    table.sort(found)
+    warn("[ld] net ids (" .. #found .. "): " .. table.concat(found, " ", 1, math.min(#found, 80)))
+    return NET.names
+end
+function NET.onSend(n, ...)
+    local batch = (...)
+    if type(batch) ~= "table" then return end
+    NET.printed = NET.printed or {}
+    local names = NET.idNames()
+    for i = 1, #batch, 2 do
+        local args, id = batch[i], batch[i + 1]
+        if type(id) == "string" then
+            local ok, pa = pcall(NET.pack, args)
+            if ok then
+                local text = NET.text(pa)
+                if type(args) == "table" and next(args) ~= nil then
+                    table.insert(NET.log, {at = os.clock(), id = id, a = pa})
+                    if #NET.log > 80 then table.remove(NET.log, 1) end
+                end
+                local pr = NET.printed[id] or {n = 0}
+                NET.printed[id] = pr
+                if pr.n < 3 and not pr[text] then
+                    pr.n = pr.n + 1
+                    pr[text] = true
+                    warn("[ld] net " .. id .. "(" .. tostring(names[id] or "?") .. ") " .. text)
+                end
+            end
+        end
     end
 end
 function NET.hook()
     if NET.hooked ~= nil then return NET.hooked end
     NET.hooked = false
     genv.__ldNet = NET
+    NET.idNames()
     if genv.__ldNetHooked then
         NET.hooked = true
         return true
@@ -2896,7 +2919,7 @@ local function nearIn(v, pos, depth)
     end
     return false
 end
--- the newest packet of the last few seconds that carries a point next to the new unit
+-- the newest event of the last few seconds that carries a point next to the new unit
 function NET.findPlace(pos)
     local since = os.clock() - 5
     for i = #NET.log, 1, -1 do
@@ -2904,26 +2927,26 @@ function NET.findPlace(pos)
         if e.at < since then break end
         if not e.used and nearIn(e.a, pos, 0) then
             e.used = true
-            warn("[ld] net: place packet saved " .. NET.text(e.a))
-            return e.a
+            warn("[ld] net: place event saved " .. e.id .. "(" .. tostring(NET.idNames()[e.id] or "?") .. ") " .. NET.text(e.a))
+            return {id = e.id, a = e.a}
         end
     end
     if NET.hooked and (NET.missN or 0) < 3 then
         NET.missN = (NET.missN or 0) + 1
-        warn("[ld] net: no sent packet carries the point of the new unit; sends of the last 5 s:")
+        warn("[ld] net: no sent event carries the point of the new unit; events of the last 5 s:")
         for i = 1, #NET.log do
-            if NET.log[i].at >= since then warn("[ld]   " .. NET.text(NET.log[i].a)) end
+            local e = NET.log[i]
+            if e.at >= since then warn("[ld]   " .. e.id .. " " .. NET.text(e.a)) end
         end
     end
     return nil
 end
-function NET.send(packed)
+function NET.send(net)
     local r = NET.remote()
     if not r then return false, "dataRemoteEvent not found" end
+    if type(net) ~= "table" or type(net.id) ~= "string" then return false, "old macro format: record it again" end
     local ok, err = pcall(function()
-        local a = {}
-        for i = 1, packed.n or #packed do a[i] = NET.unpack(packed[i]) end
-        r:FireServer(table.unpack(a, 1, packed.n or #packed))
+        r:FireServer({NET.unpack(net.a), net.id})
     end)
     return ok, err
 end
