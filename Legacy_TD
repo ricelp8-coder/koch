@@ -1380,8 +1380,14 @@ function GU.placeNow(name, pos)
                 task.wait(0.15)
                 v:SendMouseButtonEvent(mx, my, 0, false, game, 0)
             end,
+            -- the injected tap never reaches the placement module on some phones: hand its own input handlers a
+            -- left click at the aimed point (the aim itself is already exact)
+            signal = function()
+                local n = GU.feedPlacementInput(function() return placed or ended end)
+                if n == 0 then error("no placement input handlers found", 0) end
+            end,
         }
-        local order = {"click", "touch", "touch2", "hold"}
+        local order = {"click", "signal", "touch", "touch2", "hold"}
         if GU.confirmWay then table.insert(order, 1, GU.confirmWay) end
         local used, tried = nil, {}
         for _, way in ipairs(order) do
@@ -1434,6 +1440,62 @@ function GU.placeNow(name, pos)
     end)
     GU.ownGuis(true, hidden)
     return ok, err
+end
+-- true when f was created by the game's MultiboxFramework (or another game script), not by the engine or the executor
+function GU.gameFn(f)
+    if type(f) ~= "function" then return false end
+    local src
+    pcall(function() src = debug.info(f, "s") end)
+    if type(src) == "string" and src:find("MultiboxFramework", 1, true) then return true end
+    local ok, env = pcall(getfenv, f)
+    local sc = ok and type(env) == "table" and rawget(env, "script")
+    if typeof(sc) == "Instance" then
+        local fwm = RS:FindFirstChild("MultiboxFramework")
+        return fwm ~= nil and (sc == fwm or sc:IsDescendantOf(fwm))
+    end
+    return false
+end
+function GU.feedPlacementInput(done)
+    if type(getconnections) ~= "function" then error("no getconnections in this executor", 0) end
+    local ms = lp:GetMouse()
+    local at = Vector3.new(ms.X, ms.Y, 0)
+    local function fake(kind, state)
+        return {UserInputType = kind, UserInputState = state, KeyCode = Enum.KeyCode.Unknown, Position = at, Delta = Vector3.zero}
+    end
+    local plan = {
+        {UIS.InputBegan, function() return fake(Enum.UserInputType.MouseButton1, Enum.UserInputState.Begin), false end},
+        {UIS.InputEnded, function() return fake(Enum.UserInputType.MouseButton1, Enum.UserInputState.End), false end},
+        {ms.Button1Down, function() end},
+        {ms.Button1Up, function() end},
+        {UIS.InputBegan, function() return fake(Enum.UserInputType.Touch, Enum.UserInputState.Begin), false end},
+        {UIS.InputEnded, function() return fake(Enum.UserInputType.Touch, Enum.UserInputState.End), false end},
+        {UIS.TouchTapInWorld, function() return Vector2.new(at.X, at.Y), false end},
+        {UIS.TouchEnded, function() return fake(Enum.UserInputType.Touch, Enum.UserInputState.End), false end},
+    }
+    local fired, report = 0, {}
+    for i, step in ipairs(plan) do
+        local ok, cs = pcall(getconnections, step[1])
+        local total, mine = 0, 0
+        if ok and type(cs) == "table" then
+            total = #cs
+            for _, c in ipairs(cs) do
+                local okf, f = pcall(function() return c.Function end)
+                if okf and GU.gameFn(f) then
+                    mine = mine + 1
+                    fired = fired + 1
+                    task.spawn(function() pcall(f, step[2]()) end)
+                end
+            end
+        end
+        report[#report + 1] = i .. ":" .. mine .. "/" .. total
+        if mine > 0 then
+            local t0 = os.clock()
+            while not done() and os.clock() - t0 < 0.35 do task.wait() end
+            if done() then break end
+        end
+    end
+    warn("[ld] placement handlers (signal:game/all): " .. table.concat(report, " "))
+    return fired
 end
 function GU.stopPlacing()
     local fw = FW.get()
