@@ -2837,11 +2837,18 @@ function NET.onSend(n, ...)
         end
         return
     end
+    local text = NET.text(a)
+    -- the same packet every frame (a heartbeat) is not kept and printed once
+    if text == NET.lastText then return end
+    NET.lastText = text
+    NET.seen = NET.seen or {}
+    if NET.seen[text] then return end
+    NET.seen[text] = true
     table.insert(NET.log, {at = os.clock(), a = a})
     if #NET.log > 60 then table.remove(NET.log, 1) end
-    if NET.dumped < 12 then
+    if NET.dumped < 30 then
         NET.dumped = NET.dumped + 1
-        warn("[ld] net send " .. NET.text(a))
+        warn("[ld] net send " .. text)
     end
 end
 function NET.hook()
@@ -2897,13 +2904,16 @@ function NET.findPlace(pos)
         if e.at < since then break end
         if not e.used and nearIn(e.a, pos, 0) then
             e.used = true
+            warn("[ld] net: place packet saved " .. NET.text(e.a))
             return e.a
         end
     end
-    if NET.hooked and NET.missWarn ~= true then
-        NET.missWarn = true
-        warn("[ld] net: no sent packet carries the point of the new unit; last sends:")
-        for i = math.max(1, #NET.log - 3), #NET.log do warn("[ld]   " .. NET.text(NET.log[i].a)) end
+    if NET.hooked and (NET.missN or 0) < 3 then
+        NET.missN = (NET.missN or 0) + 1
+        warn("[ld] net: no sent packet carries the point of the new unit; sends of the last 5 s:")
+        for i = 1, #NET.log do
+            if NET.log[i].at >= since then warn("[ld]   " .. NET.text(NET.log[i].a)) end
+        end
     end
     return nil
 end
