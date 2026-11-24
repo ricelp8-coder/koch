@@ -2551,7 +2551,8 @@ mc.cb.place = function(m, e)
     if not recording() then return end
     mc.keyN = mc.keyN + 1
     e.key = "T" .. mc.keyN
-    recordStep("place", e.key, e.pos, nil, {n = e.name, c = TW.placePrice(e.name)})
+    local at = mc.exactPos and mc.exactPos(e.name, e.pos) or e.pos
+    recordStep("place", e.key, at, nil, {n = e.name, c = TW.placePrice(e.name)})
     for lv = 2, tonumber(e.lv) or 1 do
         recordStep("upgrade", e.key, e.pos, nil, {n = e.name, lv = lv, c = TW.priceAt(e.name, lv)})
     end
@@ -2591,7 +2592,7 @@ local function same(myMatch)
 end
 -- placement goes through the game's own BridgeNet2 bridge: the same packet its placement code sends, no camera, taps or teleport
 local NET = {fails = 0}
-warn("[ld] build bridge1")
+warn("[ld] build bridge2")
 -- bridges live in plain tables keyed by command name: {TryPlaceTroop = ClientBridge{_name, _identifier}}; found without require()
 function NET.scan()
     if type(getgc) ~= "function" then return nil, "getgc is missing" end
@@ -2663,6 +2664,38 @@ function NET.hook()
     NET.hooked = n > 0
     return NET.hooked
 end
+-- record the exact point the game sent: a plain Lua wrapper on the bridge's own Fire, nothing hooked in the engine
+NET.sent = {}
+function NET.tap(b)
+    if rawget(b, "__ldTap") then return end
+    local ok = pcall(function()
+        local orig = b.Fire
+        rawset(b, "Fire", function(self, data)
+            if alive() and not NET.sending and type(data) == "table" then
+                local name, pos = rawget(data, 1), rawget(data, 2)
+                if type(name) == "string" and typeof(pos) == "Vector3" then
+                    NET.sent[#NET.sent + 1] = {at = os.clock(), name = name, pos = pos}
+                    if #NET.sent > 30 then table.remove(NET.sent, 1) end
+                end
+            end
+            return orig(self, data)
+        end)
+        rawset(b, "__ldTap", true)
+    end)
+    if not ok then warn("[ld] net: could not watch the place bridge, recorded positions come from the field") end
+end
+mc.exactPos = function(name, pos)
+    local since = os.clock() - 6
+    for i = #NET.sent, 1, -1 do
+        local e = NET.sent[i]
+        if e.at < since then break end
+        if not e.used and e.name == name and xzDist(e.pos, pos) < 4 then
+            e.used = true
+            return e.pos
+        end
+    end
+    return pos
+end
 function NET.ready()
     if NET.bridge then
         local node = RS:FindFirstChild("identifierStorage")
@@ -2677,6 +2710,7 @@ function NET.ready()
         NET.scanning = false
         if b then
             NET.bridge = b
+            NET.tap(b)
             warn("[ld] net: place bridge found, id " .. tostring(rawget(b, "_identifier")))
             return true
         end
@@ -2700,12 +2734,21 @@ end
 function NET.place(name, pos)
     local data = {name, pos, 1}
     if NET.bridge then
+        NET.sending = true
         local ok, err = pcall(function() NET.bridge:Fire(data) end)
+        NET.sending = false
         return ok, err
     end
     if NET.id and NET.base then return pcall(NET.base, NET.id, data) end
     return false, "no place request"
 end
+task.spawn(function()
+    task.wait(5)
+    for _ = 1, 6 do
+        if not alive() or NET.bridge or NET.ready() then return end
+        task.wait(10)
+    end
+end)
 local function sleep(t, myMatch)
     local t0 = os.clock()
     while os.clock() - t0 < t do
