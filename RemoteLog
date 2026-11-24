@@ -13,7 +13,7 @@ local MAX_STORED = 500
 local MAX_SHOWN = 120
 local MAX_ARG_CHARS = 500
 
-local State = { Active = true, Paused = false, Incoming = false, Entries = {}, Dirty = false, Ignore = {} }
+local State = { Active = true, Paused = false, Incoming = false, Exec = false, Entries = {}, Dirty = false, Ignore = {} }
 env.__RemoteLog = State
 
 local NAVY = Color3.fromHex("0d1228")
@@ -134,31 +134,44 @@ end
 
 local REMOTE = { RemoteEvent = true, RemoteFunction = true, UnreliableRemoteEvent = true }
 local HookReady = false
+-- the hook makes no namecall of its own before old(self, ...): a nested namecall (GetFullName and the like)
+-- replaces the pending method, so the game's FireServer ran as something else and never reached the server.
+-- Everything except reading the method and the calling script is done later in task.defer
 if hookmetamethod and getnamecallmethod and newcclosure then
-	if not env.__RemoteLogHooked then
+	if not env.__RemoteLogHooked2 then
 		local old
 		local ok = pcall(function()
 			old = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
 				local sink = env.__RemoteLog
-				if sink and sink.Active then
+				if sink and sink.Active and typeof(self) == "Instance" then
 					local method = getnamecallmethod()
-					if (method == "FireServer" or method == "InvokeServer") and typeof(self) == "Instance" and REMOTE[self.ClassName]
-						and not (checkcaller and checkcaller()) then
-						local caller = getcallingscript and getcallingscript()
-						local callerName = ""
-						if caller then
-							local okC, n = pcall(function() return caller:GetFullName() end)
-							callerName = okC and n or ""
+					if method == "FireServer" or method == "InvokeServer" then
+						local exec = checkcaller and checkcaller() or false
+						if not exec or sink.Exec then
+							local caller = getcallingscript and getcallingscript()
+							local n = select("#", ...)
+							local args = table.pack(...)
+							for i = 1, n do
+								if type(args[i]) == "table" then args[i] = table.clone(args[i]) end
+							end
+							task.defer(function()
+								if not REMOTE[self.ClassName] then return end
+								local callerName = exec and "executor" or ""
+								if caller and not exec then
+									local okC, nm = pcall(function() return caller:GetFullName() end)
+									callerName = okC and nm or ""
+								end
+								pcall(sink.OnCall, "out", self, method, callerName, table.unpack(args, 1, n))
+							end)
 						end
-						pcall(sink.OnCall, "out", self, method, callerName, ...)
 					end
 				end
 				return old(self, ...)
 			end))
 		end)
-		env.__RemoteLogHooked = ok
+		env.__RemoteLogHooked2 = ok
 	end
-	HookReady = env.__RemoteLogHooked == true
+	HookReady = env.__RemoteLogHooked2 == true
 end
 State.OnCall = AddEntry
 
@@ -185,8 +198,8 @@ local function Stroke(o, color)
 end
 
 local Window = Instance.new("Frame")
-Window.Size = UDim2.fromOffset(440, 320)
-Window.Position = UDim2.new(0.5, -220, 0.25, 0)
+Window.Size = UDim2.fromOffset(510, 320)
+Window.Position = UDim2.new(0.5, -255, 0.25, 0)
 Window.BackgroundColor3 = NAVY
 Window.BackgroundTransparency = 0.05
 Window.Active = true
@@ -225,6 +238,7 @@ local ClearButton = Button("Clear", 174, 58)
 local HideButton = Button("Hide", 236, 58)
 local PauseButton = Button("Pause", 298, 62)
 local InButton = Button("In: off", 364, 70)
+local ExecButton = Button("Exec: off", 438, 66)
 
 local IgnoreBox = Instance.new("TextBox")
 IgnoreBox.Position = UDim2.fromOffset(8, 38)
@@ -345,6 +359,12 @@ local function Watch(r)
 		if State.Incoming then pcall(AddEntry, "in", r, "OnClientEvent", "", ...) end
 	end)
 end
+-- Exec: also log calls made by executor scripts (another hub), to see what it sends
+ExecButton.MouseButton1Click:Connect(function()
+	State.Exec = not State.Exec
+	ExecButton.Text = State.Exec and "Exec: on" or "Exec: off"
+	ExecButton.BackgroundColor3 = State.Exec and ACCENT or OUTLINE
+end)
 local IncomingReady = false
 InButton.MouseButton1Click:Connect(function()
 	State.Incoming = not State.Incoming
