@@ -1,0 +1,17 @@
+import { WebSocket } from "ws";
+import type { DispatchResult, InstanceRole, RobloxClient, RobloxResponse, ResponseResolver } from "../../types.js";
+export declare function getInstanceRole(): InstanceRole;
+export declare function setInstanceRole(role: InstanceRole): void;
+export declare const httpResponseResolvers: Map<string, ResponseResolver>;
+export declare const requestToClientId: Map<string, string>;
+export declare const relayClients: Set<WebSocket>;
+export declare const relayRequestOrigin: Map<string, WebSocket>;
+export declare const secondaryResponseResolvers: Map<string, ResponseResolver>;
+export declare function getRelaySocket(): WebSocket | null;
+export declare function setRelaySocket(ws: WebSocket | null): void;
+export declare function resetPrimaryState(): void;
+export declare function resetSecondaryState(): void;
+export declare function SendToClient(target: RobloxClient, message: string): void;
+export declare function GetResponseOfIdFromClient(id: string, timeoutMs?: number): Promise<RobloxResponse>;
+export declare function SendArbitraryDataToClient(type: string, data: Record<string, unknown>, id?: string, clientId?: string): DispatchResult;
+export declare function handleRobloxResponse(data: RobloxResponse): void;

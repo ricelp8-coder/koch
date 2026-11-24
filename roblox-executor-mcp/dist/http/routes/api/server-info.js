@@ -1,0 +1,10 @@
+import { serverStartTime } from "../../../config.js";
+import { getActiveClients } from "../../../bridge/handlers/shared/registry.js";
+export function GET(_req, res) {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+        startTime: serverStartTime,
+        clientCount: getActiveClients().length,
+        version: "1.0.0",
+    }));
+}
