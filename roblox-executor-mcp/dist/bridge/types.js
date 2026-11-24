@@ -1,2 +1,0 @@
-export const NO_CLIENT_SENTINEL = null;
-export const INVALID_CLIENT_SENTINEL = "INVALID_CLIENT";

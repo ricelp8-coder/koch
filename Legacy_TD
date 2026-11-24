@@ -207,18 +207,6 @@ local DiamondUI = (function()
     end
 
     local recent = {}
-    local noteQueue = {}
-    task.spawn(function()
-        while true do
-            local job = table.remove(noteQueue, 1)
-            if job then
-                local ok, err = pcall(job)
-                if not ok then warn("[DiamondHub] notify failed: " .. tostring(err)) end
-            else
-                task.wait(0.05)
-            end
-        end
-    end)
     function Lib:Notify(a, b, c)
         local o = type(a) == "table" and a or {Title = a, Content = b, Duration = c}
         local title = tostring(o.Title or "")
@@ -233,9 +221,10 @@ local DiamondUI = (function()
         elseif o.Type == "Error" then
             title = title .. " - Error"
         end
-        table.insert(noteQueue, function()
+        local ok, err = pcall(function()
             Library:Notify({Title = title, Description = content, Time = dur})
         end)
+        if not ok then warn("[DiamondHub] notify failed: " .. tostring(err)) end
     end
 
     function Lib.IsOwnGui(g)
@@ -917,13 +906,6 @@ local function flash(t, kind)
     if UI.__booting then return end
     UI:Notify({Title = "Diamond Hub", Content = t, Duration = 2.5, Type = kind or "Info"})
 end
--- bump on every push: the first log line tells which file the executor got from GitHub
-warn("[ld] build net8" .. (genv.__ldNetHooked and " | a __namecall hook from an older build is still active: rejoin the game" or ""))
-if genv.__ldNetHooked then
-    task.delay(6, function()
-        UI:Notify({Title = "Diamond Hub", Content = "An older build left a hook that blocks placing: leave and rejoin the game", Duration = 10, Type = "Warning"})
-    end)
-end
 local function visible(o)
     while o and o ~= game do
         if o:IsA("LayerCollector") and not o.Enabled then return false end
@@ -1118,19 +1100,11 @@ function GU.fireSignal(sig)
             if #cs == 0 then return false end -- nobody listens: a fired signal would be a silent no-op
         end
     end
-    -- presses run on their own thread: some executors leave the calling thread without its identity after
-    -- firesignal, and a handler that yields (a popup) must not hold the caller
-    if type(firesignal) == "function" then
-        local res
-        task.spawn(function() res = pcall(firesignal, sig) end)
-        if res ~= false then return true end
-    end
+    if type(firesignal) == "function" and pcall(firesignal, sig) then return true end
     if not cs then return false end
     local any = false
     for _, c in ipairs(cs) do
-        local res
-        task.spawn(function() res = pcall(function() c:Fire() end) end)
-        if res ~= false then
+        if pcall(function() c:Fire() end) then
             any = true
         else
             -- executors without Connection:Fire still expose the handler itself
@@ -1146,44 +1120,33 @@ end
 local UIS = game:GetService("UserInputService")
 -- moves the mouse until the engine reports it at (x, y) in GetMouseLocation space; this absorbs the top bar inset
 -- and the pixel scale of phones, where the injected coordinates and the game's coordinates differ
-GU.diag = nil
-function GU.moveRaw(mx, my)
-    local v = GU.vim()
-    if v and pcall(function() v:SendMouseMoveEvent(mx, my, game) end) then return true end
-    if type(mousemoveabs) == "function" and pcall(mousemoveabs, mx, my) then return true end
-    return false
-end
-function GU.readMouse(mx, my)
-    if not GU.moveRaw(mx, my) then return nil end
-    task.wait()
-    task.wait()
-    return UIS:GetMouseLocation()
-end
--- moves the mouse so the engine sees it at (x, y) in GetMouseLocation space. The engine is probed twice to learn the
--- offset (top bar) and scale (phone pixels) between injected and game coordinates; when the probes make no sense the
--- plain point is used, so the worst case is the uncorrected click
 function GU.mouseTo(x, y)
-    local l1 = GU.readMouse(x, y)
-    if not l1 then return nil end
-    GU.diag = {x = x, y = y, l1 = l1}
-    if math.abs(l1.X - x) <= 1.5 and math.abs(l1.Y - y) <= 1.5 then return x, y end
-    local d = 40
-    local l2 = GU.readMouse(x + d, y + d)
-    if not l2 then return x, y end
-    local gx, gy = (l2.X - l1.X) / d, (l2.Y - l1.Y) / d
-    GU.diag.l2, GU.diag.gx, GU.diag.gy = l2, gx, gy
-    if gx < 0.3 or gx > 4 or gy < 0.3 or gy > 4 then
-        GU.moveRaw(x, y)
+    local v = GU.vim()
+    local mx, my, gx, gy = x, y, 1, 1
+    local last
+    for _ = 1, 8 do
+        local sent = false
+        if v then sent = pcall(function() v:SendMouseMoveEvent(mx, my, game) end) end
+        if not sent and type(mousemoveabs) == "function" then sent = pcall(mousemoveabs, mx, my) end
+        if not sent then return nil end
         task.wait()
-        return x, y
+        task.wait()
+        local loc = UIS:GetMouseLocation()
+        local ex, ey = x - loc.X, y - loc.Y
+        if math.abs(ex) <= 1.5 and math.abs(ey) <= 1.5 then return mx, my end
+        if last then
+            local dmx, dmy = mx - last.mx, my - last.my
+            local dlx, dly = loc.X - last.lx, loc.Y - last.ly
+            if (math.abs(dmx) > 2 or math.abs(dmy) > 2) and math.abs(dlx) < 0.5 and math.abs(dly) < 0.5 then
+                return x, y -- the engine does not report the injected mouse: no feedback, use the plain point
+            end
+            if math.abs(dmx) > 2 and math.abs(dlx) > 0.5 then gx = math.clamp(dlx / dmx, 0.2, 5) end
+            if math.abs(dmy) > 2 and math.abs(dly) > 0.5 then gy = math.clamp(dly / dmy, 0.2, 5) end
+        end
+        last = {mx = mx, my = my, lx = loc.X, ly = loc.Y}
+        mx, my = mx + ex / gx, my + ey / gy
     end
-    local mx, my = x + (x - l1.X) / gx, y + (y - l1.Y) / gy
-    local l3 = GU.readMouse(mx, my)
-    GU.diag.mx, GU.diag.my, GU.diag.l3 = mx, my, l3
-    if l3 and math.abs(l3.X - x) <= 3 and math.abs(l3.Y - y) <= 3 then return mx, my end
-    GU.moveRaw(x, y)
-    task.wait()
-    return x, y
+    return mx, my
 end
 function GU.clickAt(x, y)
     local mx, my = GU.mouseTo(x, y)
@@ -1321,8 +1284,6 @@ function GU.placeNow(name, pos)
     local pl = fw and fw.Placement
     local cam = workspace.CurrentCamera
     local saveType, saveCf = cam.CameraType, cam.CFrame
-    -- the spot is held at the screen centre: on phones the injected mouse and the viewport differ in scale,
-    -- and the centre is the one point where both agree
     local hold = CFrame.lookAt(pos + Vector3.new(0, 40, 0.05), pos)
     local RunS = game:GetService("RunService")
     local bound = pcall(function()
@@ -1332,26 +1293,16 @@ function GU.placeNow(name, pos)
         end)
     end)
     local hidden = GU.ownGuis(false)
-    local started, ended, placed = false, false, false
-    local conns = {}
+    local started = false
+    local conn
     if pl and pl.PlacementStarted then
-        pcall(function() conns[#conns + 1] = pl.PlacementStarted:Connect(function() started = true end) end)
-    end
-    if pl and pl.PlacementEnded then
-        pcall(function() conns[#conns + 1] = pl.PlacementEnded:Connect(function() ended = true end) end)
-    end
-    local tf = TW.folder()
-    if tf then
-        conns[#conns + 1] = tf.ChildAdded:Connect(function(m)
-            if m.Name == name then placed = true end
-        end)
+        pcall(function() conn = pl.PlacementStarted:Connect(function() started = true end) end)
     end
     local ok, err = pcall(function()
         cam.CameraType = Enum.CameraType.Scriptable
         cam.CFrame = hold
         task.wait()
         task.wait()
-        GU.inputSnap = GU.snapInput()
         if not GU.press(btn) then error("slot press failed", 0) end
         local t0 = os.clock()
         while not started and os.clock() - t0 < 0.6 do task.wait() end
@@ -1359,88 +1310,10 @@ function GU.placeNow(name, pos)
         if not GU.mouseTo(sp.X, sp.Y) then error("no mouse input in this executor", 0) end
         task.wait(0.06)
         sp = cam:WorldToViewportPoint(pos)
-        local mx, my = GU.mouseTo(sp.X, sp.Y)
-        if not mx then error("no mouse input in this executor", 0) end
-        local v = GU.vim()
-        local ways = {
-            click = function()
-                v:SendMouseButtonEvent(mx, my, 0, true, game, 0)
-                task.wait()
-                v:SendMouseButtonEvent(mx, my, 0, false, game, 0)
-            end,
-            touch = function()
-                local cx, cy = sp.X, sp.Y
-                v:SendTouchEvent(7, 0, cx, cy)
-                task.wait(0.03)
-                v:SendTouchEvent(7, 1, cx, cy)
-                task.wait(0.05)
-                v:SendTouchEvent(7, 2, cx, cy)
-            end,
-            touch2 = function()
-                v:SendTouchEvent(8, 0, mx, my)
-                task.wait(0.03)
-                v:SendTouchEvent(8, 1, mx, my)
-                task.wait(0.05)
-                v:SendTouchEvent(8, 2, mx, my)
-            end,
-            hold = function()
-                v:SendMouseButtonEvent(mx, my, 0, true, game, 0)
-                task.wait(0.15)
-                v:SendMouseButtonEvent(mx, my, 0, false, game, 0)
-            end,
-            -- the injected tap never reaches the placement module on some phones: hand its own input handlers a
-            -- left click at the aimed point (the aim itself is already exact)
-            signal = function()
-                local n = GU.feedPlacementInput(function() return placed or ended end)
-                if n == 0 then error("no placement input handlers found", 0) end
-            end,
-        }
-        local order = {"click", "signal", "touch", "touch2", "hold"}
-        if GU.confirmWay then table.insert(order, 1, GU.confirmWay) end
-        local used, tried = nil, {}
-        for _, way in ipairs(order) do
-            if not tried[way] and v then
-                tried[way] = true
-                local okW, errW = pcall(ways[way])
-                if okW then
-                    local t1 = os.clock()
-                    while not (placed or ended) and os.clock() - t1 < 0.5 do task.wait() end
-                    if placed or ended then
-                        used = way
-                        break
-                    end
-                else
-                    warn("[ld] place via " .. way .. " failed: " .. tostring(errW))
-                end
-            end
-        end
-        if not v and type(mouse1click) == "function" then pcall(mouse1click) end
-        if used then GU.confirmWay = used end
-        if not GU.dumped and pl then
-            GU.dumped = true
-            local keys = {}
-            pcall(function()
-                for k, val in pairs(pl) do keys[#keys + 1] = tostring(k) .. ":" .. typeof(val) end
-                local mt = getmetatable(pl)
-                if type(mt) == "table" and type(mt.__index) == "table" then
-                    for k, val in pairs(mt.__index) do keys[#keys + 1] = "mt." .. tostring(k) .. ":" .. typeof(val) end
-                end
-            end)
-            table.sort(keys)
-            warn("[ld] placement api: " .. table.concat(keys, ", "))
-            local vs = cam.ViewportSize
-            local ms = lp:GetMouse()
-            warn(string.format("[ld] screen: viewport %.0fx%.0f | mouse location %s | mouse xy %d,%d | touch=%s mouse=%s",
-                vs.X, vs.Y, tostring(UIS:GetMouseLocation()), ms.X, ms.Y, tostring(UIS.TouchEnabled), tostring(UIS.MouseEnabled)))
-        end
-        local dg = GU.diag
-        local hit = lp:GetMouse().Hit.Position
-        local function v2(v) return v and string.format("%.0f,%.0f", v.X, v.Y) or "-" end
-        warn(string.format("[ld] place %s: screen %.0f,%.0f | engine %s / %s / %s | mouse hit %.1f,%.1f want %.1f,%.1f | started=%s confirmed=%s",
-            tostring(name), sp.X, sp.Y, v2(dg and dg.l1), v2(dg and dg.l2), v2(dg and dg.l3),
-            hit.X, hit.Z, pos.X, pos.Z, tostring(started), tostring(used or "none")))
+        if not GU.clickAt(sp.X, sp.Y) then error("no mouse input in this executor", 0) end
+        task.wait(0.05)
     end)
-    for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
+    if conn then pcall(function() conn:Disconnect() end) end
     if bound then pcall(function() RunS:UnbindFromRenderStep("ld_place_cam") end) end
     pcall(function()
         cam.CameraType = saveType
@@ -1448,91 +1321,6 @@ function GU.placeNow(name, pos)
     end)
     GU.ownGuis(true, hidden)
     return ok, err
-end
--- true when f was created by the game's MultiboxFramework (or another game script), not by the engine or the executor
-function GU.gameFn(f)
-    if type(f) ~= "function" then return false end
-    local src
-    pcall(function() src = debug.info(f, "s") end)
-    if type(src) == "string" and src:find("MultiboxFramework", 1, true) then return true end
-    local ok, env = pcall(getfenv, f)
-    local sc = ok and type(env) == "table" and rawget(env, "script")
-    if typeof(sc) == "Instance" then
-        local fwm = RS:FindFirstChild("MultiboxFramework")
-        return fwm ~= nil and (sc == fwm or sc:IsDescendantOf(fwm))
-    end
-    return false
-end
-function GU.inputSignals()
-    local ms = lp:GetMouse()
-    return {
-        InputBegan = UIS.InputBegan, InputEnded = UIS.InputEnded, TouchEnded = UIS.TouchEnded,
-        TouchTapInWorld = UIS.TouchTapInWorld, Button1Down = ms.Button1Down, Button1Up = ms.Button1Up,
-    }
-end
-function GU.snapInput()
-    local snap = {}
-    if type(getconnections) ~= "function" then return snap end
-    for name, sig in pairs(GU.inputSignals()) do
-        local set = {}
-        local ok, cs = pcall(getconnections, sig)
-        if ok and type(cs) == "table" then
-            for _, c in ipairs(cs) do
-                local okf, f = pcall(function() return c.Function end)
-                if okf and type(f) == "function" then set[f] = true end
-            end
-        end
-        snap[name] = set
-    end
-    return snap
-end
-function GU.feedPlacementInput(done)
-    if type(getconnections) ~= "function" then error("no getconnections in this executor", 0) end
-    local ms = lp:GetMouse()
-    local at = Vector3.new(ms.X, ms.Y, 0)
-    local function fake(kind, state)
-        return {UserInputType = kind, UserInputState = state, KeyCode = Enum.KeyCode.Unknown, Position = at, Delta = Vector3.zero}
-    end
-    local plan = {
-        {"InputBegan", function() return fake(Enum.UserInputType.MouseButton1, Enum.UserInputState.Begin), false end},
-        {"InputEnded", function() return fake(Enum.UserInputType.MouseButton1, Enum.UserInputState.End), false end},
-        {"Button1Down", function() end},
-        {"Button1Up", function() end},
-        {"InputBegan", function() return fake(Enum.UserInputType.Touch, Enum.UserInputState.Begin), false end},
-        {"InputEnded", function() return fake(Enum.UserInputType.Touch, Enum.UserInputState.End), false end},
-        {"TouchTapInWorld", function() return Vector2.new(at.X, at.Y), false end},
-        {"TouchEnded", function() return fake(Enum.UserInputType.Touch, Enum.UserInputState.End), false end},
-    }
-    local sigs = GU.inputSignals()
-    local snap = GU.inputSnap or {}
-    local fired, report = 0, {}
-    for i, step in ipairs(plan) do
-        local ok, cs = pcall(getconnections, sigs[step[1]])
-        local before = snap[step[1]]
-        local total, mine = 0, 0
-        if ok and type(cs) == "table" then
-            total = #cs
-            for _, c in ipairs(cs) do
-                local okf, f = pcall(function() return c.Function end)
-                -- a handler connected by the slot press (the placement module connects on Start), or one the
-                -- framework owns
-                local fresh = okf and type(f) == "function" and before ~= nil and not before[f]
-                if okf and (fresh or GU.gameFn(f)) then
-                    mine = mine + 1
-                    fired = fired + 1
-                    task.spawn(function() pcall(f, step[2]()) end)
-                end
-            end
-        end
-        report[#report + 1] = i .. ":" .. mine .. "/" .. total
-        if mine > 0 then
-            local t0 = os.clock()
-            while not done() and os.clock() - t0 < 0.35 do task.wait() end
-            if done() then break end
-        end
-    end
-    warn("[ld] placement handlers (signal:game/all): " .. table.concat(report, " "))
-    return fired
 end
 function GU.stopPlacing()
     local fw = FW.get()
@@ -2752,203 +2540,6 @@ local function recordStep(kind, key, pos, stamp, extra)
 end
 local function a2v(a) return Vector3.new(a[1], a[2], a[3]) end
 local function recording() return mc.rec and not mc.playing end
--- NET: remote placement through BridgeNet2. The game places a unit with ClientProcess.addToQueue(id, {name, point, 1}),
--- the queue is flushed to ReplicatedStorage.dataRemoteEvent. Both the bridge names (UR_<hash>) and their ids are random on
--- every server, so nothing can be hard coded: the id is learned from the game's own placement (a plain Lua hook on
--- addToQueue, no __namecall hook), and its position in ReplicatedStorage.identifierStorage is saved to a file. The server
--- creates the bridges in the same order every time, so a new server is resolved by that position
-local NET = {log = {}, fails = 0, targets = {}, file = "LegacyTD/net_place.json"}
-function NET.order()
-    local out = {}
-    local st = RS:FindFirstChild("identifierStorage")
-    if not st then return out end
-    for _, c in ipairs(st:GetChildren()) do
-        if c:IsA("StringValue") then out[#out + 1] = {name = c.Name, value = c.Value} end
-    end
-    return out
-end
-function NET.kind(name) return string.sub(name, 1, 3) end
-function NET.sig(list)
-    local t = table.create(#list)
-    for i, e in ipairs(list) do
-        local k = NET.kind(e.name)
-        t[i] = (k == "UR_" and "U") or (k == "FR_" and "F") or "-"
-    end
-    return table.concat(t)
-end
-function NET.load()
-    if NET.saved ~= nil then return NET.saved or nil end
-    local d
-    if type(readfile) == "function" and type(isfile) == "function" then
-        local ok, raw = pcall(function() if isfile(NET.file) then return readfile(NET.file) end end)
-        if ok and type(raw) == "string" then
-            local ok2, t = pcall(function() return HttpService:JSONDecode(raw) end)
-            if ok2 and type(t) == "table" then d = t end
-        end
-    end
-    d = d or genv.ld_net_saved
-    if type(d) == "table" and tonumber(d.index) and type(d.sig) == "string" then
-        NET.saved = d
-    else
-        NET.saved = false
-    end
-    return NET.saved or nil
-end
-function NET.store(d)
-    NET.saved = d
-    genv.ld_net_saved = d
-    if type(writefile) == "function" then
-        pcall(function()
-            if type(isfolder) == "function" and type(makefolder) == "function" and not isfolder("LegacyTD") then
-                makefolder("LegacyTD")
-            end
-            writefile(NET.file, HttpService:JSONEncode(d))
-        end)
-    end
-end
--- the BridgeNet2 client queue is a plain table with addToQueue/registerBridge/connect; found without require()
-function NET.findProcess()
-    if type(getgc) ~= "function" then return nil, "getgc is missing" end
-    local ok, all = pcall(getgc, true)
-    if not ok or type(all) ~= "table" then return nil, "getgc failed" end
-    local found, n = {}, 0
-    for i = 1, #all do
-        local t = all[i]
-        if type(t) == "table" then
-            n = n + 1
-            if type(rawget(t, "addToQueue")) == "function" and type(rawget(t, "registerBridge")) == "function"
-                and type(rawget(t, "connect")) == "function" then
-                found[#found + 1] = t
-            end
-        end
-        if i % 30000 == 0 then task.wait() end
-    end
-    return found, n
-end
-function NET.hook()
-    if NET.hooked ~= nil or NET.hooking then return NET.hooked end
-    NET.hooking = true
-    local tbls, n = NET.findProcess()
-    NET.hooking = false
-    if not tbls then
-        NET.hooked = false
-        warn("[ld] net: " .. tostring(n))
-        return false
-    end
-    if #tbls == 0 then
-        NET.hooked = false
-        warn("[ld] net: the BridgeNet2 client queue was not found among " .. tostring(n) .. " tables")
-        return false
-    end
-    genv.__ldNetW = genv.__ldNetW or setmetatable({}, {__mode = "k"})
-    local W = genv.__ldNetW
-    local ok = 0
-    for _, t in ipairs(tbls) do
-        local cur = rawget(t, "addToQueue")
-        local base = W[cur] or cur
-        local function wrapper(id, data)
-            if alive() and cfg.netPlace ~= false and type(data) == "table" then
-                local name, pos = rawget(data, 1), rawget(data, 2)
-                if type(name) == "string" and typeof(pos) == "Vector3" then
-                    task.defer(NET.seen, id, name, pos, rawget(data, 3))
-                end
-            end
-            return base(id, data)
-        end
-        W[wrapper] = base
-        local set = pcall(function()
-            if isreadonly and setreadonly and isreadonly(t) then setreadonly(t, false) end
-            rawset(t, "addToQueue", wrapper)
-        end)
-        if set then
-            ok = ok + 1
-            NET.base = NET.base or base
-        end
-    end
-    NET.hooked = ok > 0
-    warn("[ld] net: BridgeNet2 queue hooked (" .. ok .. "/" .. #tbls .. ") in " .. tostring(n) .. " tables")
-    return NET.hooked
-end
--- the game just queued {unit name, point, n}: that is the place request, so this id is the place bridge
-function NET.seen(id, name, pos, third)
-    if not alive() or type(id) ~= "string" or not TW.def(name) then return end
-    table.insert(NET.log, {at = os.clock(), id = id, pos = pos, third = third})
-    if #NET.log > 40 then table.remove(NET.log, 1) end
-    NET.id, NET.guess, NET.badGuess, NET.fails = id, false, false, 0
-    NET.learn(id)
-end
-function NET.learn(id)
-    local list = NET.order()
-    local idx
-    for i, e in ipairs(list) do
-        if e.value == id then idx = i break end
-    end
-    if not idx then
-        warn("[ld] net: id " .. id .. " is not in identifierStorage (" .. #list .. " entries)")
-        return
-    end
-    local d = {index = idx, total = #list, sig = NET.sig(list), kind = NET.kind(list[idx].name), at = os.time()}
-    local old = NET.load()
-    if not (old and old.index == d.index and old.sig == d.sig) then NET.store(d) end
-    if not NET.announced then
-        NET.announced = true
-        warn("[ld] net: place bridge learned: id " .. id .. " is #" .. idx .. " of " .. #list .. " (" .. d.kind .. ")")
-        warn("[ld] net: layout " .. d.sig)
-        flash("Remote placement learned: macros place units by themselves now", "Success")
-    end
-end
--- a server that has not placed anything yet: the saved position in identifierStorage
-function NET.resolve()
-    if NET.id then return NET.id, NET.guess end
-    if NET.badGuess then return nil end
-    local sv = NET.load()
-    if not sv then return nil end
-    local list = NET.order()
-    local i = tonumber(sv.index)
-    local e = i and list[i]
-    if not e or NET.kind(e.name) ~= (sv.kind or "UR_") then return nil end
-    local sig = NET.sig(list)
-    local n = math.min(#sig, #sv.sig, i + 6)
-    if string.sub(sig, 1, n) ~= string.sub(sv.sig, 1, n) then return nil end
-    NET.id, NET.guess = e.value, true
-    warn("[ld] net: place bridge guessed from its saved position #" .. i .. " of " .. #list .. ": id " .. e.value)
-    return NET.id, true
-end
-function NET.place(s, p)
-    local id = NET.resolve()
-    if not id then return false, "the place request is not known yet" end
-    if not NET.base then return false, "BridgeNet2 is not hooked" end
-    local net = s.net
-    local pos, third = p, 1
-    if type(net) == "table" then
-        if type(net.p) == "table" and tonumber(net.p[1]) and tonumber(net.p[2]) and tonumber(net.p[3]) then
-            pos = Vector3.new(net.p[1], net.p[2], net.p[3])
-        end
-        third = tonumber(net.a3) or 1
-    end
-    if not NET.logged then
-        NET.logged = true
-        warn(string.format("[ld] net place: id %s {%s, %.1f,%.1f,%.1f, %s}%s", id, tostring(s.n), pos.X, pos.Y, pos.Z,
-            tostring(third), NET.guess and " (guessed id)" or ""))
-    end
-    return pcall(NET.base, id, {s.n, pos, third})
-end
--- the point the game sent for the unit that just appeared (packets of the last seconds)
-function NET.findPlace(pos)
-    local since = os.clock() - 6
-    for i = #NET.log, 1, -1 do
-        local e = NET.log[i]
-        if e.at < since then break end
-        if not e.used and xzDist(e.pos, pos) < 4 then
-            e.used = true
-            return {a3 = e.third, p = {e.pos.X, e.pos.Y, e.pos.Z}}
-        end
-    end
-    return nil
-end
-task.delay(4, function()
-    if alive() and cfg.netPlace ~= false then NET.hook() end
-end)
 local MX = {}
 function MX.byKey(key)
     local pos = key and mc.k2pos[key]
@@ -2960,8 +2551,7 @@ mc.cb.place = function(m, e)
     if not recording() then return end
     mc.keyN = mc.keyN + 1
     e.key = "T" .. mc.keyN
-    local net = NET.hooked and NET.findPlace(e.pos) or nil
-    recordStep("place", e.key, e.pos, nil, {n = e.name, c = TW.placePrice(e.name), net = net})
+    recordStep("place", e.key, e.pos, nil, {n = e.name, c = TW.placePrice(e.name)})
     for lv = 2, tonumber(e.lv) or 1 do
         recordStep("upgrade", e.key, e.pos, nil, {n = e.name, lv = lv, c = TW.priceAt(e.name, lv)})
     end
@@ -3053,25 +2643,6 @@ function MX.findWait(s, myMatch, timeout)
     end, timeout or 2.5, myMatch, 0.05)
     return m, e
 end
--- blocks until the place request is known: learned from a unit placed by hand, or guessed from the saved position
-function NET.waitReady(myMatch)
-    if NET.hooked == nil and not NET.hooking then NET.hook() end
-    while NET.hooking and same(myMatch) do task.wait(0.1) end
-    if NET.hooked ~= true then
-        if not NET.warnedHook then
-            NET.warnedHook = true
-            flash("Remote placement is unavailable here (BridgeNet2 not found): turn Remote Placement off in Misc", "Error")
-        end
-        return false
-    end
-    while same(myMatch) do
-        if NET.resolve() then return true end
-        flash("Place ANY unit by hand once: the script learns the placement request from it", "Warning")
-        warn("[ld] net: waiting for one hand-placed unit (the place request is not known on this server)")
-        if waitUntil(function() return NET.resolve() ~= nil end, 20, myMatch, 0.5) then return true end
-    end
-    return false
-end
 function MX.place(s, myMatch)
     local p = a2v(s.p)
     local have, he = TR.at(p, s.n, mc.claim)
@@ -3089,7 +2660,6 @@ function MX.place(s, myMatch)
             if s.k then mc.k2pos[s.k] = te.pos end
             return true, there
         end
-        if cfg.netPlace ~= false and not NET.waitReady(myMatch) then return false end
         local margin = 1 + 0.03 * math.min(moneyFails, 10)
         local price = TW.placePrice(s.n) or s.c or 0
         local ready = waitUntil(function()
@@ -3109,16 +2679,7 @@ function MX.place(s, myMatch)
         end
         local before = money()
         local calledAt = os.clock()
-        local sent, why
-        NET.used = false
-        if cfg.netPlace ~= false then
-            -- no tap fallback: the tapping path crashes the game on phones
-            sent, why = NET.place(s, p)
-            NET.used = sent and true or false
-            if not sent then warn("[ld] net place " .. tostring(s.n) .. " failed: " .. tostring(why)) end
-        else
-            sent, why = GU.place(s.n, p)
-        end
+        local sent, why = GU.place(s.n, p)
         if not sent and why == "not in hotbar" then
             if not mc.warnedHotbar[s.n] then
                 mc.warnedHotbar[s.n] = true
@@ -3142,11 +2703,6 @@ function MX.place(s, myMatch)
             end, 3.5, myMatch, 0.03)
         end
         if nm then
-            if NET.used and NET.guess then
-                NET.guess = false
-                warn("[ld] net: the guessed place bridge works")
-                flash("Remote placement works", "Success")
-            end
             mc.claim[nm] = true
             MX.reserve(before, price)
             local live = TW.pos(nm) or ne.pos
@@ -3158,14 +2714,6 @@ function MX.place(s, myMatch)
             return true, nm
         end
         mc.spend = nil
-        if NET.used and money() >= price then
-            NET.fails = NET.fails + 1
-            warn("[ld] net place " .. tostring(s.n) .. ": sent, but no unit appeared (" .. NET.fails .. ")")
-            if NET.guess and NET.fails >= 2 then
-                NET.id, NET.guess, NET.badGuess = nil, false, true
-                flash("The guessed place request did not work: place ANY unit by hand once to teach it", "Warning")
-            end
-        end
         GU.stopPlacing()
         if money() < price then
             moneyFails = moneyFails + 1
@@ -4584,13 +4132,6 @@ function MISC.noFog(on)
 end
 local miscTab = Win:AddTab("Misc", {Icon = "wrench"})
 local miscSec = miscTab:AddSection(nil)
-miscSec:AddToggle({
-    Name = "Remote Placement", Flag = "netPlace", Default = true,
-    Tooltip = "Play Macro places units by sending the game's own place request instead of tapping the screen (works on phones). The request is learned from the first unit you place by hand. Turn off to place by tapping",
-    Callback = function(v)
-        cfg.netPlace = v
-    end,
-})
 miscSec:AddToggle({
     Name = "Anti AFK", Flag = "antiAfk", Tooltip = "Stops the game from kicking you for being idle",
     Callback = function(v) MISC.antiAfk(v) end,
