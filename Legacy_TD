@@ -2592,28 +2592,237 @@ local function same(myMatch)
 end
 -- placement goes through the game's own BridgeNet2 bridge: the same packet its placement code sends, no camera, taps or teleport
 local NET = {fails = 0}
-warn("[ld] build bridge2")
+warn("[ld] build bridge3")
 -- bridges live in plain tables keyed by command name: {TryPlaceTroop = ClientBridge{_name, _identifier}}; found without require()
-function NET.scan()
+function NET.scan(names)
     if type(getgc) ~= "function" then return nil, "getgc is missing" end
     local ok, all = pcall(getgc, true)
     if not ok or type(all) ~= "table" then return nil, "getgc failed" end
     local storage = RS:FindFirstChild("identifierStorage")
+    local found, count = {}, 0
     for i = 1, #all do
         local t = all[i]
         if type(t) == "table" then
-            local b = rawget(t, "TryPlaceTroop")
-            if type(b) == "table" and type(rawget(b, "_identifier")) == "string" and type(rawget(b, "_name")) == "string" then
-                local node = storage and storage:FindFirstChild(rawget(b, "_name"))
-                local good, fire = pcall(function() return b.Fire end)
-                if good and type(fire) == "function" and node and node.Value == rawget(b, "_identifier") then
-                    return b
+            for _, nm in ipairs(names) do
+                local b = rawget(t, nm)
+                if type(b) == "table" and type(rawget(b, "_identifier")) == "string" and type(rawget(b, "_name")) == "string" then
+                    local node = storage and storage:FindFirstChild(rawget(b, "_name"))
+                    local good, fire = pcall(function() return b.Fire end)
+                    if good and type(fire) == "function" and node and node.Value == rawget(b, "_identifier") and not found[b] then
+                        found[b] = nm
+                        count = count + 1
+                    end
                 end
             end
         end
         if i % 30000 == 0 then task.wait() end
     end
-    return nil, "bridge not found"
+    if count == 0 then return nil, "bridge not found" end
+    local pick, key, n = nil, nil, 0
+    for b, nm in pairs(found) do
+        if not key or rawget(b, "_name") ~= key then n = n + 1 end
+        pick, key = b, rawget(b, "_name")
+    end
+    if n > 1 then return nil, "several place bridges match" end
+    return pick, found[pick]
+end
+-- the game's name hash: its own pure function, found in the Network upvalues and checked against bridges that already exist
+local function upv(fn)
+    local bulk = (type(debug) == "table" and debug.getupvalues) or getupvalues
+    if type(bulk) == "function" then
+        local ok, rows = pcall(bulk, fn)
+        if ok and type(rows) == "table" then return rows end
+    end
+    local one = getupvalue or (type(debug) == "table" and debug.getupvalue)
+    local rows = {}
+    if type(one) == "function" then
+        for i = 1, 48 do
+            local ok, a, b = pcall(one, fn, i)
+            if not ok or a == nil then break end
+            rows[i] = b ~= nil and b or a
+        end
+    end
+    return rows
+end
+local function consts(fn)
+    local g = getconstants or (type(debug) == "table" and debug.getconstants)
+    if type(g) ~= "function" then return nil end
+    local ok, rows = pcall(g, fn)
+    if ok and type(rows) == "table" then return rows end
+    return nil
+end
+function NET.node(key)
+    local st = RS:FindFirstChild("identifierStorage")
+    local n = type(key) == "string" and st and st:FindFirstChild(key)
+    if n and n:IsA("StringValue") and type(n.Value) == "string" and #n.Value > 0 then return n end
+    return nil
+end
+local HASH_STYLES = {
+    function(n) return {"Event-" .. n, "Event"} end,
+    function(n) return {"Event-" .. n} end,
+    function(n) return {n, "Event"} end,
+    function(n) return {n} end,
+    function(n) return {"Event", "Event-" .. n} end,
+    function(n) return {"Event", n} end,
+}
+function NET.prepare()
+    local net = FW.net()
+    if not net then return false end
+    if NET.hasher and NET.hashJob == game.JobId then return true end
+    local anchors = {"VoteMap", "QueueChanged", "ShowMatchFinishStat", "CreateNotification", "ReplicaChange"}
+    local queue, seen, at, known, cands, examined = {}, {}, 1, {}, {}, 0
+    local function enqueue(v, depth)
+        if depth > 7 or seen[v] or #queue >= 600 then return end
+        if type(v) ~= "table" and type(v) ~= "function" then return end
+        seen[v] = true
+        queue[#queue + 1] = {v, depth}
+    end
+    enqueue(net.CreateEvent, 0) enqueue(net.Fire, 0) enqueue(net.Fired, 0) enqueue(net.GetIdentifierByName, 0) enqueue(net, 0)
+    while queue[at] and examined < 600 do
+        local v, depth = queue[at][1], queue[at][2]
+        at = at + 1
+        examined = examined + 1
+        if type(v) == "function" then
+            local k = consts(v)
+            if k then
+                local set = {}
+                for _, c in pairs(k) do if type(c) == "string" then set[c] = true end end
+                if set.UR_ and set.FR_ and (set.sha3_224 or set.sha512_224 or set.sha512_256)
+                    and not set.Fire and not set.FireServer and not set.ReferenceBridge then
+                    cands[#cands + 1] = v
+                end
+            end
+            local rows = upv(v)
+            for _, c in pairs(rows) do if type(c) == "function" then enqueue(c, depth + 1) end end
+            for _, c in pairs(rows) do if type(c) == "table" then enqueue(c, depth + 1) end end
+        else
+            for _, nm in ipairs(anchors) do
+                local br = rawget(v, nm)
+                local id = type(br) == "table" and rawget(br, "_name") or type(br) == "string" and br
+                if NET.node(id) then known[nm] = id end
+            end
+            local n = 0
+            for _, c in next, v do
+                n = n + 1
+                if n > 80 then break end
+                if type(c) == "function" then enqueue(c, depth + 1) end
+            end
+            n = 0
+            for _, c in next, v do
+                n = n + 1
+                if n > 80 then break end
+                if type(c) == "table" then enqueue(c, depth + 1) end
+            end
+        end
+    end
+    local kc = 0
+    for _ in pairs(known) do kc = kc + 1 end
+    if kc < 2 then
+        warn("[ld] net: name hash not verified: " .. kc .. " anchors, " .. #cands .. " hash functions, " .. examined .. " nodes")
+        return false
+    end
+    for _, fn in ipairs(cands) do
+        for si, mk in ipairs(HASH_STYLES) do
+            local okAll, hits = true, 0
+            for nm, expected in pairs(known) do
+                local good, got = pcall(fn, table.unpack(mk(nm)))
+                if not good or got ~= expected then okAll = false break end
+                hits = hits + 1
+            end
+            if okAll and hits >= 2 then
+                NET.hasher, NET.hashStyle, NET.hashJob = fn, si, game.JobId
+                warn("[ld] net: name hash verified (style " .. si .. ", " .. hits .. " bridges)")
+                return true
+            end
+        end
+    end
+    warn("[ld] net: the game's name hash did not match its bridges")
+    return false
+end
+function NET.hashKey(name)
+    if not NET.prepare() then return nil end
+    local mk = HASH_STYLES[NET.hashStyle]
+    local good, key = pcall(NET.hasher, table.unpack(mk(name)))
+    if good and type(key) == "string" and key:sub(1, 3) == "UR_" and NET.node(key) then return key end
+    local sOk, send = pcall(NET.hasher, "Func-" .. name .. "-Send", "FuncSend")
+    local rOk, recv = pcall(NET.hasher, "Func-" .. name .. "-Recv", "FuncRecieve")
+    if sOk and rOk and type(send) == "string" and send:sub(1, 3) == "UR_" and type(recv) == "string"
+        and recv:sub(1, 3) == "FR_" and NET.node(send) and NET.node(recv) then
+        return send
+    end
+    return nil
+end
+-- names the placement code sends: constants of its functions that call Fire/Invoke and look like "...place..."
+function NET.names()
+    local out, seen = {"TryPlaceTroop"}, {TryPlaceTroop = true}
+    local fw = FW.get()
+    if not fw then return out end
+    local queue, vis, at = {}, {}, 1
+    local function add(v, d)
+        if d > 8 or vis[v] or #queue >= 350 then return end
+        if type(v) ~= "table" and type(v) ~= "function" then return end
+        vis[v] = true
+        queue[#queue + 1] = {v, d}
+    end
+    add(fw.Placement, 0)
+    local inter = fw.Interactions
+    if type(inter) == "table" then add(inter.ClickedScreen, 0) add(inter.ReleasedScreen, 0) end
+    while queue[at] do
+        local v, d = queue[at][1], queue[at][2]
+        at = at + 1
+        if type(v) == "function" then
+            local k = consts(v)
+            if k then
+                local sending = false
+                for _, c in pairs(k) do if c == "Fire" or c == "Invoke" then sending = true end end
+                if sending then
+                    for _, c in pairs(k) do
+                        if type(c) == "string" and #c < 80 and c:match("^[%a_][%w_]+$") and c:lower():find("place", 1, true) and not seen[c] then
+                            seen[c] = true
+                            out[#out + 1] = c
+                        end
+                    end
+                end
+            end
+            for _, c in pairs(upv(v)) do add(c, d + 1) end
+        else
+            local n = 0
+            for _, c in next, v do
+                n = n + 1
+                if n > 80 then break end
+                add(c, d + 1)
+            end
+        end
+    end
+    return out
+end
+function NET.discover()
+    local names = NET.names()
+    local br, nm = NET.scan(names)
+    if br then
+        NET.bridge, NET.key = br, rawget(br, "_name")
+        NET.tap(br)
+        warn("[ld] net: place bridge '" .. tostring(nm) .. "' found")
+        return true
+    end
+    local keys, uniq = {}, {}
+    for _, name in ipairs(names) do
+        local k = NET.hashKey(name)
+        if k and not uniq[k] then
+            uniq[k] = name
+            keys[#keys + 1] = k
+        end
+    end
+    if #keys == 1 then
+        NET.key = keys[1]
+        warn("[ld] net: place request '" .. uniq[keys[1]] .. "' resolved by name hash")
+        return true
+    elseif #keys > 1 then
+        warn("[ld] net: several place requests match (" .. table.concat(names, ", ") .. "), none used")
+    else
+        warn("[ld] net: place request not found by name (tried " .. table.concat(names, ", ") .. ")")
+    end
+    return false
 end
 -- fallback: the queue function of BridgeNet2; a hand-placed unit tells which id is the place request
 function NET.findProcess()
@@ -2697,23 +2906,15 @@ mc.exactPos = function(name, pos)
     return pos
 end
 function NET.ready()
-    if NET.bridge then
-        local node = RS:FindFirstChild("identifierStorage")
-        node = node and node:FindFirstChild(rawget(NET.bridge, "_name"))
-        if node and node.Value == rawget(NET.bridge, "_identifier") then return true end
-        NET.bridge = nil
-    end
-    if NET.scanning then return false end
+    if NET.key and NET.node(NET.key) then return true end
+    NET.key, NET.bridge = nil, nil
+    if NET.scanning or not FW.get() then return false end
     if os.clock() - (NET.scanAt or -10) >= 3 then
         NET.scanning, NET.scanAt = true, os.clock()
-        local b = NET.scan()
+        local ok, found = pcall(NET.discover)
         NET.scanning = false
-        if b then
-            NET.bridge = b
-            NET.tap(b)
-            warn("[ld] net: place bridge found, id " .. tostring(rawget(b, "_identifier")))
-            return true
-        end
+        if ok and found then return true end
+        if not ok then warn("[ld] net: " .. tostring(found)) end
         if NET.hooked == nil then NET.hook() end
     end
     return NET.id ~= nil and NET.base ~= nil
@@ -2733,14 +2934,28 @@ function NET.waitReady(myMatch)
 end
 function NET.place(name, pos)
     local data = {name, pos, 1}
-    if NET.bridge then
-        NET.sending = true
-        local ok, err = pcall(function() NET.bridge:Fire(data) end)
-        NET.sending = false
-        return ok, err
+    local gap = 0.65 - (os.clock() - (NET.lastAt or -10))
+    if gap > 0 then task.wait(gap) end
+    NET.lastAt = os.clock()
+    NET.sending = true
+    local ok, err
+    local node = NET.key and NET.node(NET.key)
+    if NET.bridge and node then
+        ok, err = pcall(function() NET.bridge:Fire(data) end)
+    elseif node then
+        local remote = RS:FindFirstChild("dataRemoteEvent")
+        if remote then
+            ok, err = pcall(function() remote:FireServer({data, node.Value}) end)
+        else
+            ok, err = false, "dataRemoteEvent is missing"
+        end
+    elseif NET.id and NET.base then
+        ok, err = pcall(NET.base, NET.id, data)
+    else
+        ok, err = false, "no place request"
     end
-    if NET.id and NET.base then return pcall(NET.base, NET.id, data) end
-    return false, "no place request"
+    NET.sending = false
+    return ok, err
 end
 task.spawn(function()
     task.wait(5)
