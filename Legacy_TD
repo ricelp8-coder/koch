@@ -918,7 +918,7 @@ local function flash(t, kind)
     UI:Notify({Title = "Diamond Hub", Content = t, Duration = 2.5, Type = kind or "Info"})
 end
 -- bump on every push: the first log line tells which file the executor got from GitHub
-warn("[ld] build net6" .. (genv.__ldNetHooked and " | a __namecall hook from an older build is still active: rejoin the game" or ""))
+warn("[ld] build net7" .. (genv.__ldNetHooked and " | a __namecall hook from an older build is still active: rejoin the game" or ""))
 if genv.__ldNetHooked then
     task.delay(6, function()
         UI:Notify({Title = "Diamond Hub", Content = "An older build left a hook that blocks placing: leave and rejoin the game", Duration = 10, Type = "Warning"})
@@ -2840,7 +2840,9 @@ function NET.idNames()
     NET.names = {}
     local found = {}
     pcall(function()
-        for _, d in ipairs(RS:GetDescendants()) do
+        local all = RS:GetDescendants()
+        table.insert(all, 1, RS)
+        for _, d in ipairs(all) do
             for k, v in pairs(d:GetAttributes()) do
                 if type(v) == "string" and #v <= 2 then
                     NET.names[v] = k
@@ -2850,7 +2852,10 @@ function NET.idNames()
         end
     end)
     table.sort(found)
-    warn("[ld] net ids (" .. #found .. "): " .. table.concat(found, " ", 1, math.min(#found, 80)))
+    warn("[ld] net ids (" .. #found .. "):")
+    for i = 1, #found, 40 do
+        warn("[ld]   " .. table.concat(found, " ", i, math.min(#found, i + 39)))
+    end
     return NET.names
 end
 function NET.onSend(batch)
@@ -2983,42 +2988,47 @@ function NET.send(net)
     end)
     return ok, err
 end
--- place event as the game sends it: id "2", args {unit name, point, n}. What n is (rotation, slot, count) is not
--- known yet, and the game may want its "o" event in the same batch, so the variants are tried in turn; the first one
--- that makes a unit appear is kept for the session
-NET.variants = {
-    {third = "rec"}, {third = "one"}, {third = "one", pre = true}, {third = "slot"}, {third = "slot", pre = true},
-    {third = "none"}, {third = "none", pre = true},
-}
+-- place event: FireServer({{unit name, point, 1}, id}). The id is BridgeNet2's short name of the place bridge and
+-- it differs from server to server ("2" in one, "L" in another), so it is read from the identifier attributes in
+-- ReplicatedStorage each time: every bridge whose name has "place" in it is a candidate, tried in turn
+function NET.buildVariants()
+    if NET.variants then return NET.variants end
+    NET.names = nil
+    local names = NET.idNames()
+    local cands = {}
+    for id, name in pairs(names) do
+        local l = string.lower(name)
+        if l:find("place", 1, true) and not l:find("replace", 1, true) then
+            table.insert(cands, {id = id, name = name, rank = (l:find("troop", 1, true) or l:find("tower", 1, true) or l:find("unit", 1, true)) and 0 or 1})
+        end
+    end
+    table.sort(cands, function(x, y)
+        if x.rank ~= y.rank then return x.rank < y.rank end
+        return x.name < y.name
+    end)
+    local v = {}
+    for _, c in ipairs(cands) do table.insert(v, {id = c.id, name = c.name, third = "one"}) end
+    for _, c in ipairs(cands) do table.insert(v, {id = c.id, name = c.name, third = "slot"}) end
+    local list = {}
+    for _, c in ipairs(cands) do table.insert(list, c.id .. "=" .. c.name) end
+    warn("[ld] net place candidates: " .. (#list > 0 and table.concat(list, " ") or "none"))
+    NET.variants = v
+    return v
+end
 function NET.place(s, p)
     local r = NET.remote()
     if not r then return false, "dataRemoteEvent not found" end
+    local vs = NET.buildVariants()
     local idx = NET.way or (NET.fails + 1)
-    local v = NET.variants[idx]
+    local v = vs[idx]
     if not v then return false, "no variants left" end
     NET.cur = idx
-    local id = "2"
-    if type(s.net) == "table" and type(s.net.id) == "string" then id = s.net.id end
-    local args
-    if v.third == "rec" and type(s.net) == "table" and s.net.a then
-        local okA, a = pcall(NET.unpack, s.net.a)
-        if okA and type(a) == "table" then args = a end
-    end
-    if args then
-        -- recorded as sent by the game
-    elseif v.third == "one" or v.third == "rec" then
-        args = {s.n, p, 1}
-    elseif v.third == "slot" then
-        args = {s.n, p, GU.slotOf(s.n) or 1}
-    else
-        args = {s.n, p}
-    end
-    local batch = v.pre and {{}, "o", args, id} or {args, id}
-    warn(string.format("[ld] net place try %d: id %s {%s, %.1f,%.1f,%.1f, %s}%s", idx, id, tostring(s.n),
-        p.X, p.Y, p.Z, tostring(args[3]), v.pre and " after o" or ""))
+    local args = {s.n, p, v.third == "slot" and (GU.slotOf(s.n) or 1) or 1}
+    warn(string.format("[ld] net place try %d: %s=%s {%s, %.1f,%.1f,%.1f, %s}", idx, v.id, v.name, tostring(s.n),
+        p.X, p.Y, p.Z, tostring(args[3])))
     NET.listen()
     NET.listenUntil = os.clock() + 3
-    local ok, err = pcall(function() r:FireServer(batch) end)
+    local ok, err = pcall(function() r:FireServer({args, v.id}) end)
     return ok, err
 end
 local MX = {}
@@ -3165,7 +3175,7 @@ function MX.place(s, myMatch)
         NET.viaNet = false
         if cfg.netPlace ~= false then
             -- no tap fallback here: the tapping path crashes the game on phones
-            if not NET.way and NET.fails >= #NET.variants then
+            if not NET.way and NET.fails >= #NET.buildVariants() then
                 if not NET.gaveUp then
                     NET.gaveUp = true
                     flash("Remote placement: no variant worked, placing is stopped. Send the [ld] net lines", "Error")
