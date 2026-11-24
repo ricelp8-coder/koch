@@ -2589,6 +2589,123 @@ end
 local function same(myMatch)
     return alive() and mc.play and mc.matchId == myMatch
 end
+-- placement goes through the game's own BridgeNet2 bridge: the same packet its placement code sends, no camera, taps or teleport
+local NET = {fails = 0}
+warn("[ld] build bridge1")
+-- bridges live in plain tables keyed by command name: {TryPlaceTroop = ClientBridge{_name, _identifier}}; found without require()
+function NET.scan()
+    if type(getgc) ~= "function" then return nil, "getgc is missing" end
+    local ok, all = pcall(getgc, true)
+    if not ok or type(all) ~= "table" then return nil, "getgc failed" end
+    local storage = RS:FindFirstChild("identifierStorage")
+    for i = 1, #all do
+        local t = all[i]
+        if type(t) == "table" then
+            local b = rawget(t, "TryPlaceTroop")
+            if type(b) == "table" and type(rawget(b, "_identifier")) == "string" and type(rawget(b, "_name")) == "string" then
+                local node = storage and storage:FindFirstChild(rawget(b, "_name"))
+                local good, fire = pcall(function() return b.Fire end)
+                if good and type(fire) == "function" and node and node.Value == rawget(b, "_identifier") then
+                    return b
+                end
+            end
+        end
+        if i % 30000 == 0 then task.wait() end
+    end
+    return nil, "bridge not found"
+end
+-- fallback: the queue function of BridgeNet2; a hand-placed unit tells which id is the place request
+function NET.findProcess()
+    local ok, all = pcall(getgc, true)
+    if not ok or type(all) ~= "table" then return {} end
+    local found = {}
+    for i = 1, #all do
+        local t = all[i]
+        if type(t) == "table" and type(rawget(t, "addToQueue")) == "function"
+            and type(rawget(t, "registerBridge")) == "function" and type(rawget(t, "connect")) == "function" then
+            found[#found + 1] = t
+        end
+        if i % 30000 == 0 then task.wait() end
+    end
+    return found
+end
+function NET.hook()
+    if NET.hooked ~= nil or NET.hooking then return NET.hooked end
+    NET.hooking = true
+    local tbls = NET.findProcess()
+    NET.hooking = false
+    genv.__ldNetW = genv.__ldNetW or setmetatable({}, {__mode = "k"})
+    local W = genv.__ldNetW
+    local n = 0
+    for _, t in ipairs(tbls) do
+        local cur = rawget(t, "addToQueue")
+        local base = W[cur] or cur
+        local function wrapper(id, data)
+            if alive() and type(data) == "table" and type(id) == "string" then
+                local name, pos = rawget(data, 1), rawget(data, 2)
+                if type(name) == "string" and typeof(pos) == "Vector3" then
+                    task.defer(function()
+                        if alive() and TW.def(name) then NET.id = id end
+                    end)
+                end
+            end
+            return base(id, data)
+        end
+        W[wrapper] = base
+        if pcall(function()
+            if isreadonly and setreadonly and isreadonly(t) then setreadonly(t, false) end
+            rawset(t, "addToQueue", wrapper)
+        end) then
+            n = n + 1
+            NET.base = NET.base or base
+        end
+    end
+    NET.hooked = n > 0
+    return NET.hooked
+end
+function NET.ready()
+    if NET.bridge then
+        local node = RS:FindFirstChild("identifierStorage")
+        node = node and node:FindFirstChild(rawget(NET.bridge, "_name"))
+        if node and node.Value == rawget(NET.bridge, "_identifier") then return true end
+        NET.bridge = nil
+    end
+    if NET.scanning then return false end
+    if os.clock() - (NET.scanAt or -10) >= 3 then
+        NET.scanning, NET.scanAt = true, os.clock()
+        local b = NET.scan()
+        NET.scanning = false
+        if b then
+            NET.bridge = b
+            warn("[ld] net: place bridge found, id " .. tostring(rawget(b, "_identifier")))
+            return true
+        end
+        if NET.hooked == nil then NET.hook() end
+    end
+    return NET.id ~= nil and NET.base ~= nil
+end
+function NET.waitReady(myMatch)
+    local at = os.clock()
+    local told = -math.huge
+    while same(myMatch) do
+        if NET.ready() then return true end
+        if os.clock() - at > 15 and os.clock() - told > 20 then
+            told = os.clock()
+            flash("Place ANY unit by hand once: the script learns the placement request from it", "Warning")
+        end
+        task.wait(0.25)
+    end
+    return false
+end
+function NET.place(name, pos)
+    local data = {name, pos, 1}
+    if NET.bridge then
+        local ok, err = pcall(function() NET.bridge:Fire(data) end)
+        return ok, err
+    end
+    if NET.id and NET.base then return pcall(NET.base, NET.id, data) end
+    return false, "no place request"
+end
 local function sleep(t, myMatch)
     local t0 = os.clock()
     while os.clock() - t0 < t do
@@ -2653,6 +2770,7 @@ function MX.place(s, myMatch)
     end
     if not s.n then return false end
     local attempts, moneyFails = 0, 0
+    if not NET.waitReady(myMatch) then return false end
     while same(myMatch) do
         local there, te = TR.at(p, s.n, mc.claim)
         if there then
@@ -2679,14 +2797,8 @@ function MX.place(s, myMatch)
         end
         local before = money()
         local calledAt = os.clock()
-        local sent, why = GU.place(s.n, p)
-        if not sent and why == "not in hotbar" then
-            if not mc.warnedHotbar[s.n] then
-                mc.warnedHotbar[s.n] = true
-                flash(tostring(s.n) .. " is not equipped: step skipped", "Warning")
-            end
-            return false
-        end
+        local sent, why = NET.place(s.n, p)
+        if not sent then warn("[ld] net place failed: " .. tostring(why)) end
         MX.touch(0.4)
         local nm, ne
         if sent then
@@ -2714,7 +2826,6 @@ function MX.place(s, myMatch)
             return true, nm
         end
         mc.spend = nil
-        GU.stopPlacing()
         if money() < price then
             moneyFails = moneyFails + 1
             if not sleep(0.35 + 0.15 * math.min(moneyFails, 8), myMatch) then return false end
@@ -2903,7 +3014,19 @@ local function runPlayback(myMatch)
         if not same(myMatch) then break end
         mc.stepNo = i
         if gate(s, myMatch) then
-            -- playback is disabled: no placing, upgrading, selling, targeting or skipping
+            if s.t == "place" then
+                MX.place(s, myMatch)
+            elseif s.t == "upgrade" then
+                MX.upgrade(s, myMatch)
+            elseif s.t == "sell" then
+                MX.sell(s, myMatch)
+            elseif s.t == "target" then
+                MX.target(s, myMatch)
+            elseif s.t == "skip" then
+                MX.skip(s, myMatch)
+            elseif s.t == "act" then
+                MX.act(s, myMatch)
+            end
             task.wait()
         end
     end
