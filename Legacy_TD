@@ -2903,19 +2903,7 @@ local function runPlayback(myMatch)
         if not same(myMatch) then break end
         mc.stepNo = i
         if gate(s, myMatch) then
-            if s.t == "place" then
-                MX.place(s, myMatch)
-            elseif s.t == "upgrade" then
-                MX.upgrade(s, myMatch)
-            elseif s.t == "sell" then
-                MX.sell(s, myMatch)
-            elseif s.t == "target" then
-                MX.target(s, myMatch)
-            elseif s.t == "skip" then
-                MX.skip(s, myMatch)
-            elseif s.t == "act" then
-                MX.act(s, myMatch)
-            end
+            -- playback is disabled: no placing, upgrading, selling, targeting or skipping
             task.wait()
         end
     end
