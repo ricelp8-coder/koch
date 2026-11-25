@@ -2593,7 +2593,7 @@ local function same(myMatch)
 end
 -- placement goes through the game's own BridgeNet2 bridge: the same packet its placement code sends, no camera, taps or teleport
 local NET = {fails = 0}
-warn("[ld] build bridge5")
+warn("[ld] build bridge6")
 -- bridges live in plain tables keyed by command name: {TryPlaceTroop = ClientBridge{_name, _identifier}}; found without require()
 function NET.scan(names)
     if type(getgc) ~= "function" then return {} end
@@ -2818,6 +2818,7 @@ end
 function NET.write(d)
     if type(writefile) ~= "function" then
         warn("[ld] net: this executor has no writefile, nothing saved")
+        flash("Save failed: writefile is missing", "Error")
         return
     end
     local ok, err = pcall(function()
@@ -2825,6 +2826,7 @@ function NET.write(d)
         writefile(NET.file, HttpService:JSONEncode(d))
     end)
     warn("[ld] net: " .. (ok and ("saved to workspace/" .. NET.file) or ("save failed: " .. tostring(err))))
+    flash(ok and "Saved LegacyTD/place_route.json" or ("Save failed: " .. tostring(err)), ok and "Success" or "Error")
 end
 function NET.saveName(name)
     NET.saved = name
@@ -2843,6 +2845,7 @@ function NET.saveIndex(key)
             return
         end
     end
+    flash("Save failed: the request is not in identifierStorage", "Error")
 end
 function NET.byIndex()
     NET.savedName()
@@ -2964,7 +2967,8 @@ function NET.learn(e)
     warn(string.format("[ld] net: place request learned from your unit: id %s, %s, args {%s, %.1f,%.1f,%.1f, %s}%s",
         e.id, key:sub(1, 12), e.name, e.pos.X, e.pos.Y, e.pos.Z, tostring(e.param),
         old and old ~= key and (" (the script had " .. old:sub(1, 12) .. ")") or ""))
-    flash("Placement request learned from your unit", "Success")
+    local okS, errS = pcall(NET.saveIndex, key)
+    flash("Placement request learned from your unit" .. (okS and "" or (" (save error: " .. tostring(errS) .. ")")), "Success")
     task.spawn(function()
         local names = {}
         for _, n in ipairs({"TryPlaceTroop", table.unpack(NET.names())}) do names[#names + 1] = n end
@@ -2978,8 +2982,7 @@ function NET.learn(e)
                 return
             end
         end
-        NET.saveIndex(key)
-        warn("[ld] net: its name was not found, saved its position in identifierStorage instead")
+        warn("[ld] net: its name was not found, its position in identifierStorage is saved instead")
     end)
 end
 function NET.ready()
