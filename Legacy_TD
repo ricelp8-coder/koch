@@ -2092,6 +2092,7 @@ function MT.newMatch()
     if mc.rec and finishRecording then finishRecording("New match") end
     mc.matchId = mc.matchId + 1
     mc.wave = 0
+    if mc.whReset then mc.whReset() end
     MT.clearStamps()
     mc.claim, mc.k2pos, mc.spend, mc.nextAt = {}, {}, nil, 0
     mc.finalSeen = false
@@ -2191,6 +2192,7 @@ end
 local WH = {url = "", enabled = false, onEnd = true, image = "", icon = "", busy = false, last = nil,
     defaultImage = "https://cdn.discordapp.com/attachments/1562919492181565470/1569079932632699072/38a64fd5-21f2-4853-b1cd-1d5f4de25cd9.jpg?ex=6af22710&is=6af0d590&hm=09323bd2aa4b77efb31d126acb517f66850d2290a2b6dbe8e0b4201d83fb9d56&",
     defaultIcon = "https://cdn.discordapp.com/attachments/1562919492181565470/1569081973874495648/IMG_20261029_225652_662.jpg?ex=6af228f6&is=6af0d776&hm=572c30860c06acb0182f35cdae5aa9e6e740afaea76246cd345ffa20b213566d&"}
+mc.whReset = function() WH.last = nil end
 local WH_HOSTS = {["discord.com"] = true, ["discordapp.com"] = true, ["ptb.discord.com"] = true, ["canary.discord.com"] = true}
 function WH.clean(u)
     u = tostring(u or ""):gsub("%s+", "")
@@ -2276,11 +2278,11 @@ function WH.embed(won, info)
         }
     end
     local coins, gems = WH.account()
-    fields[#fields + 1] = {
+    if coins ~= nil or gems ~= nil then fields[#fields + 1] = {
         name = "Account Totals",
         value = string.format("\240\159\146\181 Total Coins: %s\n\240\159\146\142 Total Gems: %s", WH.fmt(coins), WH.fmt(gems)),
         inline = false,
-    }
+    } end
     local img = WH.imageUrl()
     local icon = WH.iconUrl()
     local embed = {
@@ -2295,17 +2297,43 @@ function WH.embed(won, info)
         embeds = {embed},
     }
 end
+function WH.gui()
+    local fr = path(pg, "Match/MatchFinish/MatchFinishFrame")
+    if not fr then return {} end
+    local function txt(p)
+        local o = path(fr, p)
+        return (o and o:IsA("TextLabel") or o and o:IsA("TextButton")) and o.Text or nil
+    end
+    local function num(p)
+        local t = txt(p)
+        return t and tonumber((t:gsub("[^%d%.]", ""))) or nil
+    end
+    local out = {}
+    local res = txt("MatchOutcome")
+    if res and res:find("won") then out.won = true elseif res and res:find("lost") then out.won = false end
+    local mode = txt("ModeInfo")
+    out.mode = mode and mode:match("^Mode:%s*(.+)$")
+    local map = txt("MapInfo")
+    out.map = map and map:match("^Map:%s*(.+)$")
+    out.coins = num("CurrenciesAwarded/CoinsAwarded/TotalAwarded/AmountFrame/AmountText")
+    out.candy = num("CurrenciesAwarded/CandyAwarded/TotalAwarded/AmountFrame/AmountText")
+    return out
+end
 function WH.snapshot()
     local last = WH.last or {}
+    local g = WH.gui()
+    local won = last.won
+    if won == nil then won = g.won end
     local map = last.map or currentMap()
     if type(map) == "string" and MAP_BY_ID[map] then map = MAP_BY_ID[map].name end
     local timer = tonumber(MD.val("MatchTimer"))
     return {
-        mode = last.mode or st.matchMode or "?",
-        map = map,
+        won = won,
+        mode = last.mode or g.mode or st.matchMode or "?",
+        map = map or g.map,
         wave = math.max(MD.wave(), mc.wave or 0),
         time = (timer and timer > 0) and timer or (st.matchStart and (os.clock() - st.matchStart) or nil),
-        coins = last.coins, candy = last.candy,
+        coins = last.coins or g.coins, candy = last.candy or g.candy,
     }
 end
 function WH.send(won, info, quiet, done)
@@ -2330,16 +2358,18 @@ function WH.matchEnd()
     if not (WH.enabled and WH.onEnd) then return end
     WH.busy = true
     task.spawn(function()
-        task.wait(0.8)
+        local t0 = os.clock()
+        repeat task.wait(0.2) until WH.last or WH.gui().won ~= nil or os.clock() - t0 > 4
+        task.wait(0.3)
         local info = WH.snapshot()
-        WH.send(WH.last and WH.last.won, info, true, function() WH.busy = false end)
+        WH.send(info.won, info, true, function() WH.busy = false end)
     end)
 end
 function MT.ended(stat)
+    if stat then WH.last = stat end
     if mc.finalSeen then return end
     if mc.wave < 1 and MD.wave() < 1 then return end
     mc.finalSeen = true
-    if stat then WH.last = stat end
     WH.matchEnd()
     if mc.rec and finishRecording then finishRecording("Round ended") end
     mc.matchId = mc.matchId + 1
