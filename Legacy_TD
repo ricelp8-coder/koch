@@ -2593,7 +2593,7 @@ local function same(myMatch)
 end
 -- placement goes through the game's own BridgeNet2 bridge: the same packet its placement code sends, no camera, taps or teleport
 local NET = {fails = 0}
-warn("[ld] build bridge6")
+warn("[ld] build bridge7")
 -- bridges live in plain tables keyed by command name: {TryPlaceTroop = ClientBridge{_name, _identifier}}; found without require()
 function NET.scan(names)
     if type(getgc) ~= "function" then return {} end
@@ -2847,9 +2847,11 @@ function NET.saveIndex(key)
     end
     flash("Save failed: the request is not in identifierStorage", "Error")
 end
+-- learned from a hand-placed unit; the same layout is in both match dumps, so it is the default
+NET.defaultIdx = {index = 31, sig = "---UUFUUUUUUUUUFUUUUUFUUUFUFUUUUUFUFUUFUUFUFUUUUUUUU"}
 function NET.byIndex()
     NET.savedName()
-    local d = NET.savedIdx
+    local d = NET.savedIdx or NET.defaultIdx
     if not d then return nil end
     local list, sig = NET.layout()
     local i = tonumber(d.index)
