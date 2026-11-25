@@ -2593,7 +2593,7 @@ local function same(myMatch)
 end
 -- placement goes through the game's own BridgeNet2 bridge: the same packet its placement code sends, no camera, taps or teleport
 local NET = {fails = 0}
-warn("[ld] build bridge7")
+warn("[ld] build bridge8")
 -- bridges live in plain tables keyed by command name: {TryPlaceTroop = ClientBridge{_name, _identifier}}; found without require()
 function NET.scan(names)
     if type(getgc) ~= "function" then return {} end
@@ -3021,15 +3021,14 @@ function NET.place(name, pos, param)
     NET.lastAt = os.clock()
     local ok, err
     NET.sending = true
-    if NET.base then
+    -- exactly what Kero sends: its own FireServer call with one {payload, id} pair, outside the game's queue
+    local remote = RS:FindFirstChild("dataRemoteEvent")
+    if remote then
+        ok, err = pcall(function() remote:FireServer({data, node.Value}) end)
+    elseif NET.base then
         ok, err = pcall(NET.base, node.Value, data)
     else
-        local remote = RS:FindFirstChild("dataRemoteEvent")
-        if remote then
-            ok, err = pcall(function() remote:FireServer({data, node.Value}) end)
-        else
-            ok, err = false, "dataRemoteEvent is missing"
-        end
+        ok, err = false, "dataRemoteEvent is missing"
     end
     NET.sending = false
     if not NET.loggedSend then
