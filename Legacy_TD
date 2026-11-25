@@ -2593,7 +2593,7 @@ local function same(myMatch)
 end
 -- placement goes through the game's own BridgeNet2 bridge: the same packet its placement code sends, no camera, taps or teleport
 local NET = {fails = 0}
-warn("[ld] build bridge4")
+warn("[ld] build bridge5")
 -- bridges live in plain tables keyed by command name: {TryPlaceTroop = ClientBridge{_name, _identifier}}; found without require()
 function NET.scan(names)
     if type(getgc) ~= "function" then return {} end
@@ -2794,20 +2794,65 @@ function NET.savedName()
         pcall(function()
             if isfile(NET.file) then
                 local d = HttpService:JSONDecode(readfile(NET.file))
-                if type(d) == "table" and type(d.name) == "string" and #d.name > 0 then NET.saved = d.name end
+                if type(d) == "table" then
+                    NET.savedIdx = tonumber(d.index) and d or nil
+                    if type(d.name) == "string" and #d.name > 0 then NET.saved = d.name end
+                end
             end
         end)
     end
     return NET.saved or nil
 end
+function NET.layout()
+    local st = RS:FindFirstChild("identifierStorage")
+    local list, sig = {}, {}
+    for _, c in ipairs(st and st:GetChildren() or {}) do
+        if c:IsA("StringValue") then
+            list[#list + 1] = c
+            local k = c.Name:sub(1, 3)
+            sig[#sig + 1] = (k == "UR_" and "U") or (k == "FR_" and "F") or "-"
+        end
+    end
+    return list, table.concat(sig)
+end
+function NET.write(d)
+    if type(writefile) ~= "function" then
+        warn("[ld] net: this executor has no writefile, nothing saved")
+        return
+    end
+    local ok, err = pcall(function()
+        if type(isfolder) == "function" and type(makefolder) == "function" and not isfolder("LegacyTD") then makefolder("LegacyTD") end
+        writefile(NET.file, HttpService:JSONEncode(d))
+    end)
+    warn("[ld] net: " .. (ok and ("saved to workspace/" .. NET.file) or ("save failed: " .. tostring(err))))
+end
 function NET.saveName(name)
     NET.saved = name
-    if type(writefile) == "function" then
-        pcall(function()
-            if type(isfolder) == "function" and type(makefolder) == "function" and not isfolder("LegacyTD") then makefolder("LegacyTD") end
-            writefile(NET.file, HttpService:JSONEncode({name = name}))
-        end)
+    local d = NET.savedIdx or {}
+    d.name = name
+    NET.write(d)
+end
+-- the name stays hidden: keep where the request sits in identifierStorage (the layout is the same on every server)
+function NET.saveIndex(key)
+    local list, sig = NET.layout()
+    for i, c in ipairs(list) do
+        if c.Name == key then
+            local d = {index = i, sig = sig, name = NET.saved or nil}
+            NET.savedIdx = d
+            NET.write(d)
+            return
+        end
     end
+end
+function NET.byIndex()
+    NET.savedName()
+    local d = NET.savedIdx
+    if not d then return nil end
+    local list, sig = NET.layout()
+    local i = tonumber(d.index)
+    local c = i and list[i]
+    if not c or c.Name:sub(1, 3) ~= "UR_" or type(d.sig) ~= "string" or sig ~= d.sig then return nil end
+    return c.Name
 end
 -- which name the game uses: the saved one first, then TryPlaceTroop, then "...place..." constants of its placement code
 function NET.discover()
@@ -2824,6 +2869,12 @@ function NET.discover()
             warn("[ld] net: place request '" .. nm .. "' found (" .. NET.how .. "), " .. key:sub(1, 12))
             return true
         end
+    end
+    local ik = NET.byIndex()
+    if ik then
+        NET.key, NET.keyName, NET.how = ik, nil, "saved position"
+        warn("[ld] net: place request taken from its saved position, " .. ik:sub(1, 12))
+        return true
     end
     if not NET.toldMiss then
         NET.toldMiss = true
@@ -2921,12 +2972,14 @@ function NET.learn(e)
         for _, n in ipairs(names) do
             if cache[n] == key or NET.hashKey(n) == key then
                 NET.keyName = n
-                NET.saveName(n)
+                NET.saved = n
+                NET.saveIndex(key)
                 warn("[ld] net: its name is '" .. n .. "', saved for other servers")
                 return
             end
         end
-        warn("[ld] net: its name was not found; place one unit by hand on each new server")
+        NET.saveIndex(key)
+        warn("[ld] net: its name was not found, saved its position in identifierStorage instead")
     end)
 end
 function NET.ready()
