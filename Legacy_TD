@@ -1231,102 +1231,6 @@ end
 function GU.playAgain()
     return GU.press(path(pg, "Match/MatchFinish/MatchFinishFrame/EndOptions/PlayAgain/ButtonFrame/PlayAgainButton"))
 end
-function GU.ownGuis(on, saved)
-    if on then
-        for g in pairs(saved or {}) do pcall(function() g.Enabled = true end) end
-        return nil
-    end
-    local out = {}
-    local roots = {pg}
-    pcall(function() roots[#roots + 1] = game:GetService("CoreGui") end)
-    if type(gethui) == "function" then pcall(function() roots[#roots + 1] = gethui() end) end
-    local lib = UI and UI.Library
-    for _, root in ipairs(roots) do
-        pcall(function()
-            for _, g in ipairs(root:GetChildren()) do
-                if g:IsA("ScreenGui") and g.Enabled and (g == (lib and lib.ScreenGui) or UI.IsOwnGui(g)) then
-                    g.Enabled = false
-                    out[g] = true
-                end
-            end
-        end)
-    end
-    return out
-end
-function GU.slotOf(name)
-    local data = FW.data()
-    local eq = data and data.EquippedTroops
-    if type(eq) == "table" then
-        for i = 1, 5 do
-            if eq[i] == name then return i end
-        end
-    end
-    local d = TW.def(name)
-    local icon = d and d.Icon
-    if icon then
-        for i = 1, 5 do
-            local ic = path(pg, "MainFrames/TroopsSelector/Troops/Troop" .. i .. "/TroopIcon")
-            if ic and ic.Image == icon then return i end
-        end
-    end
-    return nil
-end
--- placement the way a player does it: pick the hotbar slot, then click the spot. The camera is held straight above
--- the spot for the whole step, so the player's own camera angle and zoom do not matter
-function GU.place(name, pos)
-    return GU.locked(GU.placeNow, name, pos)
-end
-function GU.placeNow(name, pos)
-    local i = GU.slotOf(name)
-    local btn = i and path(pg, "MainFrames/TroopsSelector/Troops/Troop" .. i .. "/InteractiveButton")
-    if not btn then return false, "not in hotbar" end
-    local fw = FW.get()
-    local pl = fw and fw.Placement
-    local cam = workspace.CurrentCamera
-    local saveType, saveCf = cam.CameraType, cam.CFrame
-    local hold = CFrame.lookAt(pos + Vector3.new(0, 40, 0.05), pos)
-    local RunS = game:GetService("RunService")
-    local bound = pcall(function()
-        RunS:BindToRenderStep("ld_place_cam", Enum.RenderPriority.Camera.Value + 10, function()
-            cam.CameraType = Enum.CameraType.Scriptable
-            cam.CFrame = hold
-        end)
-    end)
-    local hidden = GU.ownGuis(false)
-    local started = false
-    local conn
-    if pl and pl.PlacementStarted then
-        pcall(function() conn = pl.PlacementStarted:Connect(function() started = true end) end)
-    end
-    local ok, err = pcall(function()
-        cam.CameraType = Enum.CameraType.Scriptable
-        cam.CFrame = hold
-        task.wait()
-        task.wait()
-        if not GU.press(btn) then error("slot press failed", 0) end
-        local t0 = os.clock()
-        while not started and os.clock() - t0 < 0.6 do task.wait() end
-        local sp = cam:WorldToViewportPoint(pos)
-        if not GU.mouseTo(sp.X, sp.Y) then error("no mouse input in this executor", 0) end
-        task.wait(0.06)
-        sp = cam:WorldToViewportPoint(pos)
-        if not GU.clickAt(sp.X, sp.Y) then error("no mouse input in this executor", 0) end
-        task.wait(0.05)
-    end)
-    if conn then pcall(function() conn:Disconnect() end) end
-    if bound then pcall(function() RunS:UnbindFromRenderStep("ld_place_cam") end) end
-    pcall(function()
-        cam.CameraType = saveType
-        cam.CFrame = saveCf
-    end)
-    GU.ownGuis(true, hidden)
-    return ok, err
-end
-function GU.stopPlacing()
-    local fw = FW.get()
-    local pl = fw and fw.Placement
-    if pl and type(pl.Stop) == "function" then pcall(pl.Stop) end
-end
 -- lobby: the same idea, the game's own buttons and its own confirmation popup
 function GU.big(names, timeout)
     local frame = path(pg, "MainFrames/NotificationFrame")
@@ -2121,7 +2025,8 @@ function TR.consider(m)
             if o.Value == lp then
                 local last, same_ = nil, 0
                 local t1 = os.clock()
-                while alive() and m.Parent and os.clock() - t1 < 1.5 and same_ < 3 do
+                -- recording waits for the unit to settle (its point is recorded); playback only needs to know it exists
+                while not mc.playing and alive() and m.Parent and os.clock() - t1 < 1.5 and same_ < 3 do
                     local p = TW.pos(m)
                     if p and last and (p - last).Magnitude < 0.01 then same_ = same_ + 1 else same_ = 0 end
                     last = p
@@ -2132,7 +2037,7 @@ function TR.consider(m)
             return
         end
         if os.clock() - t0 > 5 then return end
-        task.wait(0.1)
+        task.wait(mc.playing and 0.03 or 0.1)
     end
 end
 function TR.connect()
@@ -2214,11 +2119,9 @@ function MT.waveChanged(n)
     n = tonumber(n) or 0
     if n <= 0 then
         -- a wave counter that drops to 0 mid-round is not a new match; the next round is caught by finalSeen
-        if mc.wave > 0 and not mc.finalSeen then warn("[ld] wave counter went to 0 on wave " .. mc.wave) end
         return
     end
     if n < mc.wave and not mc.finalSeen then
-        warn("[ld] new match: wave " .. mc.wave .. " -> " .. n)
         MT.newMatch()
     elseif n <= 1 and mc.finalSeen then
         MT.newMatch()
@@ -2591,362 +2494,63 @@ end
 local function same(myMatch)
     return alive() and mc.play and mc.matchId == myMatch
 end
--- placement goes through the game's own BridgeNet2 bridge: the same packet its placement code sends, no camera, taps or teleport
-local NET = {fails = 0}
-warn("[ld] build bridge8")
--- bridges live in plain tables keyed by command name: {TryPlaceTroop = ClientBridge{_name, _identifier}}; found without require()
-function NET.scan(names)
-    if type(getgc) ~= "function" then return {} end
-    local ok, all = pcall(getgc, true)
-    if not ok or type(all) ~= "table" then return {} end
-    local found = {}
-    for i = 1, #all do
-        local t = all[i]
-        if type(t) == "table" then
-            for _, nm in ipairs(names) do
-                local b = rawget(t, nm)
-                if type(b) == "table" and not found[nm] then
-                    local key, wire = rawget(b, "_name"), rawget(b, "_identifier")
-                    local node = type(key) == "string" and key:sub(1, 3) == "UR_" and NET.node(key)
-                    if node and node.Value == wire then found[nm] = key end
-                end
-            end
-        end
-        if i % 20000 == 0 then task.wait() end
-    end
-    return found
-end
--- the game's name hash: its own pure function, found in the Network upvalues and checked against bridges that already exist
-local function upv(fn)
-    local bulk = (type(debug) == "table" and debug.getupvalues) or getupvalues
-    if type(bulk) == "function" then
-        local ok, rows = pcall(bulk, fn)
-        if ok and type(rows) == "table" then return rows end
-    end
-    local one = getupvalue or (type(debug) == "table" and debug.getupvalue)
-    local rows = {}
-    if type(one) == "function" then
-        for i = 1, 48 do
-            local ok, a, b = pcall(one, fn, i)
-            if not ok or a == nil then break end
-            rows[i] = b ~= nil and b or a
-        end
-    end
-    return rows
-end
-local function consts(fn)
-    local g = getconstants or (type(debug) == "table" and debug.getconstants)
-    if type(g) ~= "function" then return nil end
-    local ok, rows = pcall(g, fn)
-    if ok and type(rows) == "table" then return rows end
-    return nil
-end
-function NET.node(key)
+-- placement: the game's own place request (BridgeNet2 bridge #31 of identifierStorage), sent the way the game sends it
+local NET = {sent = {}}
+-- identifierStorage names change per server, its order does not; the place request sits at #31 of this layout
+NET.index, NET.sig = 31, "---UUFUUUUUUUUUFUUUUUFUUUFUFUUUUUFUFUUFUUFUFUUUUUUUU"
+function NET.key()
     local st = RS:FindFirstChild("identifierStorage")
-    local n = type(key) == "string" and st and st:FindFirstChild(key)
-    if n and n:IsA("StringValue") and type(n.Value) == "string" and #n.Value > 0 then return n end
-    return nil
-end
-local HASH_STYLES = {
-    function(n) return {"Event-" .. n, "Event"} end,
-    function(n) return {"Event-" .. n} end,
-    function(n) return {n, "Event"} end,
-    function(n) return {n} end,
-    function(n) return {"Event", "Event-" .. n} end,
-    function(n) return {"Event", n} end,
-}
-function NET.prepare()
-    local net = FW.net()
-    if not net then return false end
-    if NET.hasher and NET.hashJob == game.JobId then return true end
-    local anchors = {"VoteMap", "QueueChanged", "ShowMatchFinishStat", "CreateNotification", "ReplicaChange"}
-    local queue, seen, at, known, cands, examined = {}, {}, 1, {}, {}, 0
-    local function enqueue(v, depth)
-        if depth > 7 or seen[v] or #queue >= 600 then return end
-        if type(v) ~= "table" and type(v) ~= "function" then return end
-        seen[v] = true
-        queue[#queue + 1] = {v, depth}
-    end
-    enqueue(net.CreateEvent, 0) enqueue(net.Fire, 0) enqueue(net.Fired, 0) enqueue(net.GetIdentifierByName, 0) enqueue(net, 0)
-    while queue[at] and examined < 600 do
-        local v, depth = queue[at][1], queue[at][2]
-        at = at + 1
-        examined = examined + 1
-        if type(v) == "function" then
-            local k = consts(v)
-            if k then
-                local set = {}
-                for _, c in pairs(k) do if type(c) == "string" then set[c] = true end end
-                if set.UR_ and set.FR_ and (set.sha3_224 or set.sha512_224 or set.sha512_256)
-                    and not set.Fire and not set.FireServer and not set.ReferenceBridge then
-                    cands[#cands + 1] = v
-                end
-            end
-            local rows = upv(v)
-            for _, c in pairs(rows) do if type(c) == "function" then enqueue(c, depth + 1) end end
-            for _, c in pairs(rows) do if type(c) == "table" then enqueue(c, depth + 1) end end
-        else
-            for _, nm in ipairs(anchors) do
-                local br = rawget(v, nm)
-                local id = type(br) == "table" and rawget(br, "_name") or type(br) == "string" and br
-                if NET.node(id) then known[nm] = id end
-            end
-            local n = 0
-            for _, c in next, v do
-                n = n + 1
-                if n > 80 then break end
-                if type(c) == "function" then enqueue(c, depth + 1) end
-            end
-            n = 0
-            for _, c in next, v do
-                n = n + 1
-                if n > 80 then break end
-                if type(c) == "table" then enqueue(c, depth + 1) end
-            end
-        end
-    end
-    local kc = 0
-    for _ in pairs(known) do kc = kc + 1 end
-    if kc < 2 then
-        warn("[ld] net: name hash not verified: " .. kc .. " anchors, " .. #cands .. " hash functions, " .. examined .. " nodes")
-        return false
-    end
-    for _, fn in ipairs(cands) do
-        for si, mk in ipairs(HASH_STYLES) do
-            local okAll, hits = true, 0
-            for nm, expected in pairs(known) do
-                local good, got = pcall(fn, table.unpack(mk(nm)))
-                if not good or got ~= expected then okAll = false break end
-                hits = hits + 1
-            end
-            if okAll and hits >= 2 then
-                NET.hasher, NET.hashStyle, NET.hashJob = fn, si, game.JobId
-                warn("[ld] net: name hash verified (style " .. si .. ", " .. hits .. " bridges)")
-                return true
-            end
-        end
-    end
-    warn("[ld] net: the game's name hash did not match its bridges")
-    return false
-end
-function NET.hashKey(name)
-    if not NET.prepare() then return nil end
-    local mk = HASH_STYLES[NET.hashStyle]
-    local good, key = pcall(NET.hasher, table.unpack(mk(name)))
-    if good and type(key) == "string" and key:sub(1, 3) == "UR_" and NET.node(key) then return key end
-    local sOk, send = pcall(NET.hasher, "Func-" .. name .. "-Send", "FuncSend")
-    local rOk, recv = pcall(NET.hasher, "Func-" .. name .. "-Recv", "FuncRecieve")
-    if sOk and rOk and type(send) == "string" and send:sub(1, 3) == "UR_" and type(recv) == "string"
-        and recv:sub(1, 3) == "FR_" and NET.node(send) and NET.node(recv) then
-        return send
-    end
-    return nil
-end
--- names the placement code sends: constants of its functions that call Fire/Invoke and look like "...place..."
-function NET.names()
-    local out, seen = {"TryPlaceTroop"}, {TryPlaceTroop = true}
-    local fw = FW.get()
-    if not fw then return out end
-    local queue, vis, at = {}, {}, 1
-    local function add(v, d)
-        if d > 8 or vis[v] or #queue >= 350 then return end
-        if type(v) ~= "table" and type(v) ~= "function" then return end
-        vis[v] = true
-        queue[#queue + 1] = {v, d}
-    end
-    add(fw.Placement, 0)
-    local inter = fw.Interactions
-    if type(inter) == "table" then add(inter.ClickedScreen, 0) add(inter.ReleasedScreen, 0) end
-    while queue[at] do
-        local v, d = queue[at][1], queue[at][2]
-        at = at + 1
-        if type(v) == "function" then
-            local k = consts(v)
-            if k then
-                local sending = false
-                for _, c in pairs(k) do if c == "Fire" or c == "Invoke" then sending = true end end
-                if sending then
-                    for _, c in pairs(k) do
-                        if type(c) == "string" and #c < 80 and c:match("^[%a_][%w_]+$") and c:lower():find("place", 1, true) and not seen[c] then
-                            seen[c] = true
-                            out[#out + 1] = c
-                        end
-                    end
-                end
-            end
-            for _, c in pairs(upv(v)) do add(c, d + 1) end
-        else
-            local n = 0
-            for _, c in next, v do
-                n = n + 1
-                if n > 80 then break end
-                add(c, d + 1)
-            end
-        end
-    end
-    return out
-end
-NET.file = "LegacyTD/place_route.json"
-function NET.savedName()
-    if NET.saved ~= nil then return NET.saved or nil end
-    NET.saved = false
-    if type(readfile) == "function" and type(isfile) == "function" then
-        pcall(function()
-            if isfile(NET.file) then
-                local d = HttpService:JSONDecode(readfile(NET.file))
-                if type(d) == "table" then
-                    NET.savedIdx = tonumber(d.index) and d or nil
-                    if type(d.name) == "string" and #d.name > 0 then NET.saved = d.name end
-                end
-            end
-        end)
-    end
-    return NET.saved or nil
-end
-function NET.layout()
-    local st = RS:FindFirstChild("identifierStorage")
+    if not st then return nil end
     local list, sig = {}, {}
-    for _, c in ipairs(st and st:GetChildren() or {}) do
+    for _, c in ipairs(st:GetChildren()) do
         if c:IsA("StringValue") then
             list[#list + 1] = c
             local k = c.Name:sub(1, 3)
             sig[#sig + 1] = (k == "UR_" and "U") or (k == "FR_" and "F") or "-"
         end
     end
-    return list, table.concat(sig)
+    if table.concat(sig) ~= NET.sig then return nil end
+    local c = list[NET.index]
+    if c and #c.Value > 0 then return c.Value end
+    return nil
 end
-function NET.write(d)
-    if type(writefile) ~= "function" then
-        warn("[ld] net: this executor has no writefile, nothing saved")
-        flash("Save failed: writefile is missing", "Error")
-        return
-    end
-    local ok, err = pcall(function()
-        if type(isfolder) == "function" and type(makefolder) == "function" and not isfolder("LegacyTD") then makefolder("LegacyTD") end
-        writefile(NET.file, HttpService:JSONEncode(d))
-    end)
-    warn("[ld] net: " .. (ok and ("saved to workspace/" .. NET.file) or ("save failed: " .. tostring(err))))
-    flash(ok and "Saved LegacyTD/place_route.json" or ("Save failed: " .. tostring(err)), ok and "Success" or "Error")
-end
-function NET.saveName(name)
-    NET.saved = name
-    local d = NET.savedIdx or {}
-    d.name = name
-    NET.write(d)
-end
--- the name stays hidden: keep where the request sits in identifierStorage (the layout is the same on every server)
-function NET.saveIndex(key)
-    local list, sig = NET.layout()
-    for i, c in ipairs(list) do
-        if c.Name == key then
-            local d = {index = i, sig = sig, name = NET.saved or nil}
-            NET.savedIdx = d
-            NET.write(d)
-            return
-        end
-    end
-    flash("Save failed: the request is not in identifierStorage", "Error")
-end
--- learned from a hand-placed unit; the same layout is in both match dumps, so it is the default
-NET.defaultIdx = {index = 31, sig = "---UUFUUUUUUUUUFUUUUUFUUUFUFUUUUUFUFUUFUUFUFUUUUUUUU"}
-function NET.byIndex()
-    NET.savedName()
-    local d = NET.savedIdx or NET.defaultIdx
-    if not d then return nil end
-    local list, sig = NET.layout()
-    local i = tonumber(d.index)
-    local c = i and list[i]
-    if not c or c.Name:sub(1, 3) ~= "UR_" or type(d.sig) ~= "string" or sig ~= d.sig then return nil end
-    return c.Name
-end
--- which name the game uses: the saved one first, then TryPlaceTroop, then "...place..." constants of its placement code
-function NET.discover()
-    local ik = NET.byIndex()
-    if ik then
-        NET.key, NET.keyName, NET.how = ik, nil, "saved position"
-        warn("[ld] net: place request taken from its saved position, " .. ik:sub(1, 12))
-        return true
-    end
-    local names, seen = {}, {}
-    local function add(n) if type(n) == "string" and not seen[n] then seen[n] = true names[#names + 1] = n end end
-    add(NET.savedName())
-    add("TryPlaceTroop")
-    for _, n in ipairs(NET.names()) do add(n) end
-    local cache = NET.scan(names)
-    for _, nm in ipairs(names) do
-        local key = cache[nm] or NET.hashKey(nm)
-        if key then
-            NET.key, NET.keyName, NET.how = key, nm, cache[nm] and "bridge" or "hash"
-            warn("[ld] net: place request '" .. nm .. "' found (" .. NET.how .. "), " .. key:sub(1, 12))
-            return true
-        end
-    end
-    if not NET.toldMiss then
-        NET.toldMiss = true
-        warn("[ld] net: place request not found by name (tried " .. table.concat(names, ", ") .. ")")
-    end
-    return false
-end
--- fallback and ground truth: the BridgeNet2 queue function, wrapped by a plain Lua function (nothing in the engine is hooked)
-function NET.findProcess()
-    if type(getgc) ~= "function" then return {} end
+-- the BridgeNet2 client queue is wrapped by a plain Lua function to record the exact point and argument the game sends
+function NET.hook()
+    if NET.hooked ~= nil or type(getgc) ~= "function" then return end
+    NET.hooked = false
     local ok, all = pcall(getgc, true)
-    if not ok or type(all) ~= "table" then return {} end
-    local found = {}
+    if not ok or type(all) ~= "table" then return end
+    genv.__ldNetW = genv.__ldNetW or setmetatable({}, {__mode = "k"})
+    local W = genv.__ldNetW
     for i = 1, #all do
         local t = all[i]
         if type(t) == "table" and type(rawget(t, "addToQueue")) == "function"
             and type(rawget(t, "registerBridge")) == "function" and type(rawget(t, "connect")) == "function" then
-            found[#found + 1] = t
+            local cur = rawget(t, "addToQueue")
+            local base = W[cur] or cur
+            local function wrapper(id, data)
+                if type(data) == "table" and type(id) == "string" and alive() then
+                    local name, pos = rawget(data, 1), rawget(data, 2)
+                    if type(name) == "string" and typeof(pos) == "Vector3" then
+                        local q = NET.sent
+                        q[#q + 1] = {at = os.clock(), name = name, pos = pos, param = rawget(data, 3)}
+                        if #q > 40 then table.remove(q, 1) end
+                    end
+                end
+                return base(id, data)
+            end
+            W[wrapper] = base
+            if pcall(function()
+                if isreadonly and setreadonly and isreadonly(t) then setreadonly(t, false) end
+                rawset(t, "addToQueue", wrapper)
+            end) then
+                NET.hooked = true
+            end
         end
         if i % 20000 == 0 then task.wait() end
     end
-    return found
 end
-NET.sent = {}
-function NET.hook()
-    if NET.hooked ~= nil or NET.hooking then return NET.hooked end
-    NET.hooking = true
-    local tbls = NET.findProcess()
-    NET.hooking = false
-    genv.__ldNetW = genv.__ldNetW or setmetatable({}, {__mode = "k"})
-    local W = genv.__ldNetW
-    local n = 0
-    for _, t in ipairs(tbls) do
-        local cur = rawget(t, "addToQueue")
-        local base = W[cur] or cur
-        local function wrapper(id, data)
-            if type(data) == "table" and type(id) == "string" and alive() then
-                local name, pos = rawget(data, 1), rawget(data, 2)
-                if type(name) == "string" and typeof(pos) == "Vector3" then
-                    local q = NET.sent
-                    q[#q + 1] = {at = os.clock(), id = id, name = name, pos = pos, param = rawget(data, 3), mine = NET.sending}
-                    if #q > 40 then table.remove(q, 1) end
-                end
-            end
-            return base(id, data)
-        end
-        W[wrapper] = base
-        if pcall(function()
-            if isreadonly and setreadonly and isreadonly(t) then setreadonly(t, false) end
-            rawset(t, "addToQueue", wrapper)
-        end) then
-            n = n + 1
-            NET.base = NET.base or base
-        end
-    end
-    NET.hooked = n > 0
-    warn("[ld] net: BridgeNet2 queue " .. (NET.hooked and "watched" or "not found"))
-    return NET.hooked
-end
-function NET.keyOf(id)
-    local st = RS:FindFirstChild("identifierStorage")
-    for _, c in ipairs(st and st:GetChildren() or {}) do
-        if c:IsA("StringValue") and c.Value == id then return c.Name end
-    end
-    return nil
-end
--- a unit of ours appeared: the packet the game sent for it is the place request (Kero learns it the same way)
+-- the packet the game sent for a unit that just appeared
 mc.netSeen = function(name, pos)
     local since = os.clock() - 8
     for i = #NET.sent, 1, -1 do
@@ -2954,97 +2558,22 @@ mc.netSeen = function(name, pos)
         if e.at < since then break end
         if not e.used and e.name == name and xzDist(e.pos, pos) < 3 then
             e.used = true
-            if not e.mine then NET.learn(e) end
             return e
         end
     end
     return nil
 end
-function NET.learn(e)
-    NET.param = tonumber(e.param) or NET.param
-    local key = NET.keyOf(e.id)
-    if not key or key == NET.key and NET.how == "seen" then return end
-    local old = NET.key
-    NET.key, NET.how, NET.keyName = key, "seen", nil
-    warn(string.format("[ld] net: place request learned from your unit: id %s, %s, args {%s, %.1f,%.1f,%.1f, %s}%s",
-        e.id, key:sub(1, 12), e.name, e.pos.X, e.pos.Y, e.pos.Z, tostring(e.param),
-        old and old ~= key and (" (the script had " .. old:sub(1, 12) .. ")") or ""))
-    local okS, errS = pcall(NET.saveIndex, key)
-    flash("Placement request learned from your unit" .. (okS and "" or (" (save error: " .. tostring(errS) .. ")")), "Success")
-    task.spawn(function()
-        local names = {}
-        for _, n in ipairs({"TryPlaceTroop", table.unpack(NET.names())}) do names[#names + 1] = n end
-        local cache = NET.scan(names)
-        for _, n in ipairs(names) do
-            if cache[n] == key or NET.hashKey(n) == key then
-                NET.keyName = n
-                NET.saved = n
-                NET.saveIndex(key)
-                warn("[ld] net: its name is '" .. n .. "', saved for other servers")
-                return
-            end
-        end
-        warn("[ld] net: its name was not found, its position in identifierStorage is saved instead")
-    end)
-end
-function NET.ready()
-    if NET.key and NET.node(NET.key) then return true end
-    NET.key = nil
-    if NET.scanning or not FW.get() then return false end
-    if os.clock() - (NET.scanAt or -10) >= 4 then
-        NET.scanning, NET.scanAt = true, os.clock()
-        local ok, found = pcall(NET.discover)
-        NET.scanning = false
-        if ok and found then return true end
-        if not ok then warn("[ld] net: " .. tostring(found)) end
-    end
-    return false
-end
-function NET.waitReady(myMatch)
-    local at, told = os.clock(), -math.huge
-    while same(myMatch) do
-        if NET.ready() then return true end
-        if os.clock() - at > 10 and os.clock() - told > 20 then
-            told = os.clock()
-            flash("Place ANY unit by hand once: the script learns the placement request from it", "Warning")
-        end
-        task.wait(0.25)
-    end
-    return false
-end
 function NET.place(name, pos, param)
-    local node = NET.key and NET.node(NET.key)
-    if not node then return false, "no place request" end
-    local data = {name, pos, tonumber(param) or NET.param or 1}
+    local id = NET.key()
+    local remote = RS:FindFirstChild("dataRemoteEvent")
+    if not (id and remote) then return false, "no place request" end
     local gap = 0.65 - (os.clock() - (NET.lastAt or -10))
     if gap > 0 then task.wait(gap) end
     NET.lastAt = os.clock()
-    local ok, err
-    NET.sending = true
-    -- exactly what Kero sends: its own FireServer call with one {payload, id} pair, outside the game's queue
-    local remote = RS:FindFirstChild("dataRemoteEvent")
-    if remote then
-        ok, err = pcall(function() remote:FireServer({data, node.Value}) end)
-    elseif NET.base then
-        ok, err = pcall(NET.base, node.Value, data)
-    else
-        ok, err = false, "dataRemoteEvent is missing"
-    end
-    NET.sending = false
-    if not NET.loggedSend then
-        NET.loggedSend = true
-        warn(string.format("[ld] net: sent {%s, %.1f,%.1f,%.1f, %s} to %s (%s, %s)", name, pos.X, pos.Y, pos.Z,
-            tostring(data[3]), node.Value, NET.keyName or "?", NET.how or "?"))
-    end
-    return ok, err
+    return pcall(function() remote:FireServer({{name, pos, tonumber(param) or 1}, id}) end)
 end
 task.delay(3, function()
-    if not alive() then return end
-    NET.hook()
-    for _ = 1, 6 do
-        if not alive() or NET.ready() then return end
-        task.wait(10)
-    end
+    if alive() then NET.hook() end
 end)
 local function sleep(t, myMatch)
     local t0 = os.clock()
@@ -3110,7 +2639,13 @@ function MX.place(s, myMatch)
     end
     if not s.n then return false end
     local attempts, moneyFails = 0, 0
-    if not NET.waitReady(myMatch) then return false end
+    if not NET.key() then
+        if not mc.warnedNet then
+            mc.warnedNet = true
+            flash("The game changed its network layout: placement needs a script update", "Error")
+        end
+        return false
+    end
     while same(myMatch) do
         local there, te = TR.at(p, s.n, mc.claim)
         if there then
@@ -3137,9 +2672,8 @@ function MX.place(s, myMatch)
         end
         local before = money()
         local calledAt = os.clock()
-        local sent, why = NET.place(s.n, p, s.pr)
-        if not sent then warn("[ld] net place failed: " .. tostring(why)) end
-        MX.touch(0.4)
+        local sent = NET.place(s.n, p, s.pr)
+        MX.touch(0.15)
         local nm, ne
         if sent then
             waitUntil(function()
@@ -3159,10 +2693,6 @@ function MX.place(s, myMatch)
             MX.reserve(before, price)
             local live = TW.pos(nm) or ne.pos
             if s.k then mc.k2pos[s.k] = live end
-            if xzDist(live, p) > 3 then
-                warn(string.format("[ld] %s placed at %.1f,%.1f,%.1f but the recorded position is %.1f,%.1f,%.1f",
-                    tostring(s.n), live.X, live.Y, live.Z, p.X, p.Y, p.Z))
-            end
             return true, nm
         end
         mc.spend = nil
@@ -3171,11 +2701,6 @@ function MX.place(s, myMatch)
             if not sleep(0.35 + 0.15 * math.min(moneyFails, 8), myMatch) then return false end
         else
             attempts = attempts + 1
-            warn(string.format("[ld] net: %s sent to %s (%s), no unit appeared (%d/3)", tostring(s.n),
-                tostring(NET.keyName or (NET.key and NET.key:sub(1, 12))), tostring(NET.how), attempts))
-            if attempts == 1 and NET.how ~= "seen" then
-                flash("No unit appeared: place one unit by hand, the script will learn the real request", "Warning")
-            end
             if attempts >= 3 then
                 flash(tostring(s.n) .. ": place rejected, step skipped", "Warning")
                 return false
@@ -3333,7 +2858,6 @@ local function runPlayback(myMatch)
     mc.claim = setmetatable({}, {__mode = "k"})
     mc.k2pos = {}
     mc.spend, mc.nextAt = nil, 0
-    mc.warnedHotbar = {}
     local steps = mc.steps
     local tData = os.clock()
     while same(myMatch) and not FW.data() and os.clock() - tData < 15 do task.wait(0.2) end
