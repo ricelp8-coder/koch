@@ -979,7 +979,6 @@ function FW.isFw(t)
     end)
     return ok and r == true
 end
--- the game's own MultiboxFramework table, taken from its scripts' upvalues; require() is never called
 function FW.find()
     local gu = (type(debug) == "table" and debug.getupvalues) or getupvalues
     local fns = {}
@@ -1085,7 +1084,6 @@ function FW.shared(name)
     return nil
 end
 local TW = {}
--- match actions go through the game's own buttons: the game's handler sends the request, the hub never calls Network itself
 local GU = {lobbyPressed = false}
 function GU.vim()
     local ok, v = pcall(function() return game:GetService("VirtualInputManager") end)
@@ -1097,7 +1095,7 @@ function GU.fireSignal(sig)
         local ok, list = pcall(getconnections, sig)
         if ok and type(list) == "table" then
             cs = list
-            if #cs == 0 then return false end -- nobody listens: a fired signal would be a silent no-op
+            if #cs == 0 then return false end
         end
     end
     if type(firesignal) == "function" and pcall(firesignal, sig) then return true end
@@ -1107,7 +1105,6 @@ function GU.fireSignal(sig)
         if pcall(function() c:Fire() end) then
             any = true
         else
-            -- executors without Connection:Fire still expose the handler itself
             local okf, f = pcall(function() return c.Function end)
             if okf and type(f) == "function" then
                 task.spawn(f)
@@ -1118,8 +1115,6 @@ function GU.fireSignal(sig)
     return any
 end
 local UIS = game:GetService("UserInputService")
--- moves the mouse until the engine reports it at (x, y) in GetMouseLocation space; this absorbs the top bar inset
--- and the pixel scale of phones, where the injected coordinates and the game's coordinates differ
 function GU.mouseTo(x, y)
     local v = GU.vim()
     local mx, my, gx, gy = x, y, 1, 1
@@ -1138,7 +1133,7 @@ function GU.mouseTo(x, y)
             local dmx, dmy = mx - last.mx, my - last.my
             local dlx, dly = loc.X - last.lx, loc.Y - last.ly
             if (math.abs(dmx) > 2 or math.abs(dmy) > 2) and math.abs(dlx) < 0.5 and math.abs(dly) < 0.5 then
-                return x, y -- the engine does not report the injected mouse: no feedback, use the plain point
+                return x, y
             end
             if math.abs(dmx) > 2 and math.abs(dlx) > 0.5 then gx = math.clamp(dlx / dmx, 0.2, 5) end
             if math.abs(dmy) > 2 and math.abs(dly) > 0.5 then gy = math.clamp(dly / dmy, 0.2, 5) end
@@ -1220,7 +1215,6 @@ end
 function GU.toLobby()
     local b = path(pg, "Match/MatchFinish/MatchFinishFrame/EndOptions/ReturnToLobby/ButtonFrame/ReturnToLobbyButton")
     if not b then return false end
-    -- the button toggles: a second press cancels, so a retry presses twice (cancel, then send again)
     if GU.lobbyPressed then
         GU.press(b)
         task.wait(0.35)
@@ -1231,7 +1225,6 @@ end
 function GU.playAgain()
     return GU.press(path(pg, "Match/MatchFinish/MatchFinishFrame/EndOptions/PlayAgain/ButtonFrame/PlayAgainButton"))
 end
--- lobby: the same idea, the game's own buttons and its own confirmation popup
 function GU.big(names, timeout)
     local frame = path(pg, "MainFrames/NotificationFrame")
     local t0 = os.clock()
@@ -1293,7 +1286,6 @@ function GU.sellUnits(ids)
         local b = GU.invItem(uid)
         local icon = b and b.Parent and b.Parent:FindFirstChild("BulkSellIcon")
         if b and icon and not icon.Visible then
-            -- a locked unit answers with a popup that yields the handler: never press it on this thread
             GU.pressAsync(b)
             task.wait(0.05)
             GU.dismiss()
@@ -1333,7 +1325,6 @@ end
 function FW.fire(ev, ...)
     local r = GU.route(ev, ...)
     if r ~= nil then return r end
-    -- no button for this request: never send it ourselves
     warn("[ld] no game button for " .. tostring(ev) .. ", skipped")
     return false
 end
@@ -1996,7 +1987,6 @@ function TR.add(m)
     end)
     if mc.cb.place then pcall(mc.cb.place, m, e) end
 end
--- a frozen or stunned unit is moved to FrozenTroops/StunnedTroops and back: only a destroyed unit counts as sold
 function TR.gone(m)
     local e = mc.reg[m]
     if not e or e.gone then return end
@@ -2025,7 +2015,6 @@ function TR.consider(m)
             if o.Value == lp then
                 local last, same_ = nil, 0
                 local t1 = os.clock()
-                -- recording waits for the unit to settle (its point is recorded); playback only needs to know it exists
                 while not mc.playing and alive() and m.Parent and os.clock() - t1 < 1.5 and same_ < 3 do
                     local p = TW.pos(m)
                     if p and last and (p - last).Magnitude < 0.01 then same_ = same_ + 1 else same_ = 0 end
@@ -2118,7 +2107,6 @@ end
 function MT.waveChanged(n)
     n = tonumber(n) or 0
     if n <= 0 then
-        -- a wave counter that drops to 0 mid-round is not a new match; the next round is caught by finalSeen
         return
     end
     if n < mc.wave and not mc.finalSeen then
@@ -2349,7 +2337,6 @@ function WH.matchEnd()
 end
 function MT.ended(stat)
     if mc.finalSeen then return end
-    -- a finish screen before any wave was played is the previous round's leftover, not this match's end
     if mc.wave < 1 and MD.wave() < 1 then return end
     mc.finalSeen = true
     if stat then WH.last = stat end
@@ -2449,7 +2436,6 @@ function MX.byKey(key)
     if not pos then return nil end
     return (TR.at(pos))
 end
--- recording watches the field (new unit, level, target, sold) and the skip votes; nothing is hooked
 mc.cb.place = function(m, e)
     local sent = mc.netSeen and mc.netSeen(e.name, e.pos)
     if not recording() then return end
@@ -2494,9 +2480,7 @@ end
 local function same(myMatch)
     return alive() and mc.play and mc.matchId == myMatch
 end
--- placement: the game's own place request (BridgeNet2 bridge #31 of identifierStorage), sent the way the game sends it
 local NET = {sent = {}}
--- identifierStorage names change per server, its order does not; the place request sits at #31 of this layout
 NET.index, NET.sig = 31, "---UUFUUUUUUUUUFUUUUUFUUUFUFUUUUUFUFUUFUUFUFUUUUUUUU"
 function NET.key()
     local st = RS:FindFirstChild("identifierStorage")
@@ -2514,7 +2498,6 @@ function NET.key()
     if c and #c.Value > 0 then return c.Value end
     return nil
 end
--- the BridgeNet2 client queue is wrapped by a plain Lua function to record the exact point and argument the game sends
 function NET.hook()
     if NET.hooked ~= nil or type(getgc) ~= "function" then return end
     NET.hooked = false
@@ -2550,7 +2533,6 @@ function NET.hook()
         if i % 20000 == 0 then task.wait() end
     end
 end
--- the packet the game sent for a unit that just appeared
 mc.netSeen = function(name, pos)
     local since = os.clock() - 8
     for i = #NET.sent, 1, -1 do
@@ -3004,7 +2986,6 @@ local function saveMacro()
         return
     end
     if mc.rec then
-        -- saving ends the recording, otherwise later actions would keep landing in a macro that is already saved
         mc.rec = false
         MT.clearStamps()
         syncToggles()
@@ -4253,7 +4234,6 @@ local function initMatch()
             if mc.finalSeen and st.finishSeenOpen and not open then
                 st.finishClosedAt = st.finishClosedAt or os.clock()
                 if os.clock() - st.finishClosedAt > 2 then
-                    -- the finish screen stayed closed in this server: the next round is starting
                     st.finishSeenOpen, st.finishClosedAt = false, nil
                     pcall(MT.newMatch)
                 end
