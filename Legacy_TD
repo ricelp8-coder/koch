@@ -2861,6 +2861,12 @@ function NET.byIndex()
 end
 -- which name the game uses: the saved one first, then TryPlaceTroop, then "...place..." constants of its placement code
 function NET.discover()
+    local ik = NET.byIndex()
+    if ik then
+        NET.key, NET.keyName, NET.how = ik, nil, "saved position"
+        warn("[ld] net: place request taken from its saved position, " .. ik:sub(1, 12))
+        return true
+    end
     local names, seen = {}, {}
     local function add(n) if type(n) == "string" and not seen[n] then seen[n] = true names[#names + 1] = n end end
     add(NET.savedName())
@@ -2874,12 +2880,6 @@ function NET.discover()
             warn("[ld] net: place request '" .. nm .. "' found (" .. NET.how .. "), " .. key:sub(1, 12))
             return true
         end
-    end
-    local ik = NET.byIndex()
-    if ik then
-        NET.key, NET.keyName, NET.how = ik, nil, "saved position"
-        warn("[ld] net: place request taken from its saved position, " .. ik:sub(1, 12))
-        return true
     end
     if not NET.toldMiss then
         NET.toldMiss = true
