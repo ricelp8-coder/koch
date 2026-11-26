@@ -2512,7 +2512,9 @@ local function same(myMatch)
 end
 local NET = {sent = {}}
 NET.index, NET.sig = 31, "---UUFUUUUUUUUUFUUUUUFUUUFUFUUUUUFUFUUFUUFUFUUUUUUUU"
-function NET.key()
+NET.store = UI.MakeStore("LegacyTD/Net", "ld_net_mem")
+NET.routes = NET.store.read("routes") or {}
+function NET.layout()
     local st = RS:FindFirstChild("identifierStorage")
     if not st then return nil end
     local list, sig = {}, {}
@@ -2523,10 +2525,72 @@ function NET.key()
             sig[#sig + 1] = (k == "UR_" and "U") or (k == "FR_" and "F") or "-"
         end
     end
-    if table.concat(sig) ~= NET.sig then return nil end
-    local c = list[NET.index]
+    return list, table.concat(sig)
+end
+function NET.slot(sig)
+    return sig .. "@" .. normMap(currentMap() or "")
+end
+function NET.learn(id)
+    local list, sig = NET.layout()
+    if not list then return end
+    local idx
+    for i, c in ipairs(list) do
+        if c.Value == id or c.Name == id then idx = i break end
+    end
+    if not idx then return end
+    NET.live, NET.liveJob = list[idx].Value, game.JobId
+    NET.badJob = nil
+    local slot = NET.slot(sig)
+    if NET.routes[slot] ~= idx or NET.routes[sig] ~= idx then
+        NET.routes[slot], NET.routes[sig] = idx, idx
+        NET.store.write("routes", NET.routes)
+    end
+    if NET.waiting then
+        NET.waiting = false
+        flash("Placement learned (#" .. idx .. "), playback continues", "Success")
+    end
+end
+function NET.key()
+    local list, sig = NET.layout()
+    if not list then return nil end
+    if NET.live and NET.liveJob == game.JobId then
+        for _, c in ipairs(list) do
+            if c.Value == NET.live then return NET.live end
+        end
+    end
+    if NET.badJob == game.JobId then return nil end
+    local idx = NET.routes[NET.slot(sig)] or NET.routes[sig] or (sig == NET.sig and NET.index) or nil
+    local c = idx and list[idx]
     if c and #c.Value > 0 then return c.Value end
     return nil
+end
+function NET.forget()
+    local _, sig = NET.layout()
+    NET.live, NET.liveJob = nil, nil
+    NET.badJob = game.JobId
+    if sig then
+        NET.routes[NET.slot(sig)] = nil
+        if NET.routes[sig] then NET.routes[sig] = nil end
+        NET.store.write("routes", NET.routes)
+    end
+end
+function NET.waitLearn(myMatch)
+    if NET.hooked == false then
+        flash("Placement can't be learned here (executor has no getgc)", "Error")
+        return false
+    end
+    NET.waiting = true
+    flash("Place ONE unit by hand: the script will learn placement and continue", "Warning")
+    local t0 = os.clock()
+    while same(myMatch) do
+        if NET.key() then return true end
+        if os.clock() - t0 > 20 then
+            t0 = os.clock()
+            flash("Still waiting: place one unit by hand", "Warning")
+        end
+        task.wait(0.1)
+    end
+    return false
 end
 function NET.hook()
     if NET.hooked ~= nil or type(getgc) ~= "function" then return end
@@ -2545,6 +2609,7 @@ function NET.hook()
                 if type(data) == "table" and type(id) == "string" and alive() then
                     local name, pos = rawget(data, 1), rawget(data, 2)
                     if type(name) == "string" and typeof(pos) == "Vector3" then
+                        pcall(NET.learn, id)
                         local q = NET.sent
                         q[#q + 1] = {at = os.clock(), name = name, pos = pos, param = rawget(data, 3)}
                         if #q > 40 then table.remove(q, 1) end
@@ -2650,14 +2715,8 @@ function MX.place(s, myMatch)
         return true, have
     end
     if not s.n then return false end
-    local attempts, moneyFails = 0, 0
-    if not NET.key() then
-        if not mc.warnedNet then
-            mc.warnedNet = true
-            flash("The game changed its network layout: placement needs a script update", "Error")
-        end
-        return false
-    end
+    local attempts, moneyFails, relearned = 0, 0, false
+    if not NET.key() and not NET.waitLearn(myMatch) then return false end
     while same(myMatch) do
         local there, te = TR.at(p, s.n, mc.claim)
         if there then
@@ -2714,8 +2773,13 @@ function MX.place(s, myMatch)
         else
             attempts = attempts + 1
             if attempts >= 3 then
-                flash(tostring(s.n) .. ": place rejected, step skipped", "Warning")
-                return false
+                if relearned then
+                    flash(tostring(s.n) .. ": place rejected, step skipped", "Warning")
+                    return false
+                end
+                relearned, attempts = true, 0
+                NET.forget()
+                if not NET.waitLearn(myMatch) then return false end
             end
             if not sleep(1, myMatch) then return false end
         end
