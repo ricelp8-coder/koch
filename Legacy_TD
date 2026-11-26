@@ -2559,7 +2559,7 @@ function NET.key()
         end
     end
     if NET.badJob == game.JobId then return nil end
-    local idx = NET.routes[NET.slot(sig)] or NET.routes[sig] or (sig == NET.sig and NET.index) or nil
+    local idx = NET.routes[NET.slot(sig)] or NET.routes[sig] or (sig:sub(1, NET.index + 2) == NET.sig:sub(1, NET.index + 2) and NET.index) or nil
     local c = idx and list[idx]
     if c and #c.Value > 0 then return c.Value end
     return nil
