@@ -931,7 +931,7 @@ local function xzDist(a, b)
     return math.sqrt(dx * dx + dz * dz)
 end
 local function normMap(s)
-    return tostring(s or ""):lower():gsub("%s+", " "):match("^%s*(.-)%s*$")
+    return (tostring(s or ""):lower():gsub("[^%w]", ""))
 end
 local function isBarrier(w)
     local txt = skipBarrierInput and skipBarrierInput:Get()
@@ -2897,6 +2897,7 @@ local function runPlayback(myMatch)
     local steps = mc.steps
     local tData = os.clock()
     while same(myMatch) and not FW.data() and os.clock() - tData < 15 do task.wait(0.2) end
+    flash("Playing " .. tostring(mc.selected) .. " (" .. tostring(mc.replay) .. ", " .. #steps .. " steps)")
     mc.playT0 = os.clock()
     mc.playRt0 = nil
     for _, s0 in ipairs(steps) do
@@ -3138,8 +3139,10 @@ local function mapGate()
     if not mc.map then return "go" end
     local cur = currentMap()
     if cur then
-        if normMap(cur) == normMap(mc.map) then return "go" end
+        local a, b = normMap(cur), normMap(mc.map)
+        if a == b or a:find(b, 1, true) or b:find(a, 1, true) then return "go" end
         mc.ranMatch = mc.matchId
+        flash("Macro is for map " .. tostring(mc.map) .. ", this match is " .. tostring(cur) .. ": not playing", "Warning")
         return "block"
     end
     if mc.mapWaitMatch ~= mc.matchId then
