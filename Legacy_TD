@@ -2722,6 +2722,23 @@ function MX.place(s, myMatch)
     end
     return false
 end
+function MX.backoff(n)
+    return math.min(0.3 + 0.2 * n, 1.5)
+end
+MX.STUCK_MAX = 120
+function MX.stuckOut(t0, what)
+    local dt = os.clock() - t0
+    if dt >= 4 and not mc.stunNote then
+        mc.stunNote = true
+        flash(what .. " blocked (unit stunned?), retrying until it goes through", "Warning")
+    end
+    if dt >= MX.STUCK_MAX then
+        mc.stunNote = nil
+        flash(what .. " still blocked after " .. MX.STUCK_MAX .. "s, step skipped", "Warning")
+        return true
+    end
+    return false
+end
 function MX.awayWait(m, myMatch)
     return waitUntil(function()
         local e = mc.reg[m]
@@ -2731,6 +2748,7 @@ end
 function MX.upgrade(s, myMatch)
     local want = tonumber(s.lv)
     local misses, moneyFails = 0, 0
+    local stuckAt
     while same(myMatch) do
         local m = MX.findWait(s, myMatch)
         if not m then return false end
@@ -2764,7 +2782,7 @@ function MX.upgrade(s, myMatch)
         end, 3, myMatch, 0.03)
         if up then
             MX.reserve(before, price)
-            misses, moneyFails = 0, 0
+            misses, moneyFails, stuckAt = 0, 0, nil
         else
             mc.spend = nil
             if money() < price then
@@ -2772,37 +2790,39 @@ function MX.upgrade(s, myMatch)
                 if not sleep(0.35 + 0.15 * math.min(moneyFails, 8), myMatch) then return false end
             else
                 misses = misses + 1
-                if misses >= 4 then
-                    flash("Upgrade rejected, step skipped", "Warning")
-                    return false
-                end
-                if not sleep(0.5, myMatch) then return false end
+                stuckAt = stuckAt or os.clock()
+                if MX.stuckOut(stuckAt, "Upgrade") then return false end
+                if not sleep(MX.backoff(misses), myMatch) then return false end
             end
         end
     end
     return false
 end
 function MX.sell(s, myMatch)
-    for _ = 1, 4 do
+    local tries, stuckAt = 0, nil
+    while same(myMatch) do
         local m = MX.findWait(s, myMatch, 2)
         if not m then return true end
         if not MX.awayWait(m, myMatch) then return false end
         FW.fire("SellTroop", m)
         MX.touch(0.3)
-        if waitUntil(function() return MX.find(s) == nil end, 3, myMatch, 0.03) then return true end
-        if not same(myMatch) then return false end
-        if not sleep(0.4, myMatch) then return false end
+        if waitUntil(function() return MX.find(s) == nil end, 2, myMatch, 0.03) then return true end
+        tries = tries + 1
+        stuckAt = stuckAt or os.clock()
+        if MX.stuckOut(stuckAt, "Sell") then return false end
+        if not sleep(MX.backoff(tries), myMatch) then return false end
     end
     return false
 end
 function MX.target(s, myMatch)
-    local fails = 0
-    for _ = 1, 12 do
-        if not same(myMatch) then return false end
+    local tries, stuckAt, clicks = 0, nil, 0
+    while same(myMatch) do
         local m = MX.findWait(s, myMatch)
         if not m then return false end
         local cur = TW.target(m)
-        if cur == s.mode or cur == nil then return cur == s.mode end
+        if cur == nil then return false end
+        if cur == s.mode then return true end
+        if clicks >= 12 then return false end
         if not MX.cadence(myMatch) then return false end
         FW.fire("ChangeTargetting", m)
         MX.touch(0.3)
@@ -2810,13 +2830,17 @@ function MX.target(s, myMatch)
             local m2 = MX.find(s)
             return m2 == nil or TW.target(m2) ~= cur
         end, 2, myMatch, 0.04)
-        if not moved then
-            fails = fails + 1
-            if fails >= 3 then return false end
+        if moved then
+            clicks = clicks + 1
+            tries, stuckAt = 0, nil
+        else
+            tries = tries + 1
+            stuckAt = stuckAt or os.clock()
+            if MX.stuckOut(stuckAt, "Target") then return false end
+            if not sleep(MX.backoff(tries), myMatch) then return false end
         end
     end
-    local m = MX.find(s)
-    return m ~= nil and TW.target(m) == s.mode
+    return false
 end
 function MX.act(s, myMatch)
     if not s.ev then return false end
@@ -2894,6 +2918,7 @@ local function runPlayback(myMatch)
     for i, s in ipairs(steps) do
         if not same(myMatch) then break end
         mc.stepNo = i
+        mc.stunNote = nil
         if gate(s, myMatch) then
             if s.t == "place" then
                 MX.place(s, myMatch)
