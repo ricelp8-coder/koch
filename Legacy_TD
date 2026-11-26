@@ -2545,10 +2545,6 @@ function NET.learn(id)
         NET.routes[slot], NET.routes[sig] = idx, idx
         NET.store.write("routes", NET.routes)
     end
-    if NET.waiting then
-        NET.waiting = false
-        flash("Placement learned (#" .. idx .. "), playback continues", "Success")
-    end
 end
 function NET.key()
     local list, sig = NET.layout()
@@ -2579,7 +2575,6 @@ function NET.waitLearn(myMatch)
         flash("Placement can't be learned here (executor has no getgc)", "Error")
         return false
     end
-    NET.waiting = true
     flash("Place ONE unit by hand: the script will learn placement and continue", "Warning")
     local t0 = os.clock()
     while same(myMatch) do
@@ -2792,12 +2787,7 @@ end
 MX.STUCK_MAX = 120
 function MX.stuckOut(t0, what)
     local dt = os.clock() - t0
-    if dt >= 4 and not mc.stunNote then
-        mc.stunNote = true
-        flash(what .. " blocked (unit stunned?), retrying until it goes through", "Warning")
-    end
     if dt >= MX.STUCK_MAX then
-        mc.stunNote = nil
         flash(what .. " still blocked after " .. MX.STUCK_MAX .. "s, step skipped", "Warning")
         return true
     end
@@ -2961,7 +2951,6 @@ local function runPlayback(myMatch)
     local steps = mc.steps
     local tData = os.clock()
     while same(myMatch) and not FW.data() and os.clock() - tData < 15 do task.wait(0.2) end
-    flash("Playing " .. tostring(mc.selected) .. " (" .. tostring(mc.replay) .. ", " .. #steps .. " steps)")
     mc.playT0 = os.clock()
     mc.playRt0 = nil
     for _, s0 in ipairs(steps) do
@@ -2983,7 +2972,6 @@ local function runPlayback(myMatch)
     for i, s in ipairs(steps) do
         if not same(myMatch) then break end
         mc.stepNo = i
-        mc.stunNote = nil
         if gate(s, myMatch) then
             if s.t == "place" then
                 MX.place(s, myMatch)
