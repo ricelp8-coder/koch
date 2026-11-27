@@ -2561,14 +2561,8 @@ function NET.key()
     return nil
 end
 function NET.forget()
-    local _, sig = NET.layout()
     NET.live, NET.liveJob = nil, nil
     NET.badJob = game.JobId
-    if sig then
-        NET.routes[NET.slot(sig)] = nil
-        if NET.routes[sig] then NET.routes[sig] = nil end
-        NET.store.write("routes", NET.routes)
-    end
 end
 function NET.waitLearn(myMatch)
     if NET.hooked == false then
@@ -2577,10 +2571,15 @@ function NET.waitLearn(myMatch)
     end
     flash("Place ONE unit by hand: the script will learn placement and continue", "Warning")
     local t0 = os.clock()
+    local tn = t0
     while same(myMatch) do
         if NET.key() then return true end
-        if os.clock() - t0 > 20 then
-            t0 = os.clock()
+        if os.clock() - t0 > 90 then
+            NET.badJob = nil
+            return false
+        end
+        if os.clock() - tn > 20 then
+            tn = os.clock()
             flash("Still waiting: place one unit by hand", "Warning")
         end
         task.wait(0.1)
@@ -2710,7 +2709,7 @@ function MX.place(s, myMatch)
         return true, have
     end
     if not s.n then return false end
-    local attempts, moneyFails, relearned = 0, 0, false
+    local attempts, moneyFails, relearned, stuckAt = 0, 0, false, nil
     if not NET.key() and not NET.waitLearn(myMatch) then return false end
     while same(myMatch) do
         local there, te = TR.at(p, s.n, mc.claim)
@@ -2755,6 +2754,7 @@ function MX.place(s, myMatch)
             end, 6, myMatch, 0.05)
         end
         if nm then
+            NET.okJob = game.JobId
             mc.claim[nm] = true
             MX.reserve(before, price)
             local live = TW.pos(nm) or ne.pos
@@ -2767,16 +2767,16 @@ function MX.place(s, myMatch)
             if not sleep(0.35 + 0.15 * math.min(moneyFails, 8), myMatch) then return false end
         else
             attempts = attempts + 1
-            if attempts >= 3 then
-                if relearned then
-                    flash(tostring(s.n) .. ": place rejected, step skipped", "Warning")
-                    return false
-                end
+            stuckAt = stuckAt or os.clock()
+            if NET.okJob == game.JobId or relearned then
+                if MX.stuckOut(stuckAt, tostring(s.n) .. " place") then return false end
+            elseif attempts >= 3 then
                 relearned, attempts = true, 0
                 NET.forget()
                 if not NET.waitLearn(myMatch) then return false end
+                stuckAt = os.clock()
             end
-            if not sleep(1, myMatch) then return false end
+            if not sleep(MX.backoff(attempts), myMatch) then return false end
         end
     end
     return false
