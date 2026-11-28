@@ -1935,7 +1935,15 @@ end
 mc.cb = {}
 local TR = {}
 function TR.live(e, m)
-    return e ~= nil and e.gone == nil and m.Parent ~= nil
+    if e == nil or e.gone ~= nil or m.Parent == nil then return false end
+    local f = TW.folder()
+    if f and m.Parent ~= f and not m:IsDescendantOf(workspace) then return false end
+    return true
+end
+function TR.purge()
+    for m, e in pairs(mc.reg) do
+        if not TR.live(e, m) and not e.away then mc.reg[m] = nil end
+    end
 end
 function TR.count()
     local n = 0
@@ -2029,12 +2037,24 @@ function TR.consider(m)
         task.wait(mc.playing and 0.03 or 0.1)
     end
 end
+TR.conns = {}
+function TR.attach(f)
+    for _, c in ipairs(TR.conns) do pcall(function() c:Disconnect() end) end
+    TR.conns = {}
+    TR.folder = f
+    TR.purge()
+    TR.conns[1] = f.ChildAdded:Connect(function(m) task.spawn(TR.consider, m) end)
+    TR.conns[2] = f.ChildRemoved:Connect(function(m) TR.removed(m) end)
+    for _, m in ipairs(f:GetChildren()) do task.spawn(TR.consider, m) end
+end
+function TR.ensure()
+    local f = TW.folder()
+    if f and f ~= TR.folder then TR.attach(f) end
+end
 function TR.connect()
     local f = TW.folder() or workspace:WaitForChild("Troops", 30)
     if not f then return false end
-    f.ChildAdded:Connect(function(m) task.spawn(TR.consider, m) end)
-    f.ChildRemoved:Connect(function(m) TR.removed(m) end)
-    for _, m in ipairs(f:GetChildren()) do task.spawn(TR.consider, m) end
+    TR.attach(f)
     return true
 end
 
@@ -2096,6 +2116,7 @@ function MT.newMatch()
     MT.clearStamps()
     mc.claim, mc.k2pos, mc.spend, mc.nextAt = {}, {}, nil, 0
     mc.finalSeen = false
+    pcall(TR.purge)
     st.farmSoldMatch, st.waveStart, st.matchStart, st.matchMode = nil, nil, nil, nil
     st.skipKey, st.skipTries, st.skipSeen, st.skipHold, st.voteTries = nil, 0, false, nil, 0
     if MT.endReset then MT.endReset() end
@@ -2107,7 +2128,7 @@ function MT.newMatch()
 end
 function MT.waveChanged(n)
     n = tonumber(n) or 0
-    if n <= 0 then
+    if n <= 0 or n == mc.wave then
         return
     end
     if n < mc.wave and not mc.finalSeen then
@@ -4332,10 +4353,28 @@ local function initMatch()
             mc.wave = n
             st.waveStart, st.matchStart = os.clock(), os.clock()
         end
-        waveObj.Changed:Connect(function(v)
-            if alive() then pcall(MT.waveChanged, v) end
-        end)
     end
+    local waveConn
+    local function hookWave(o)
+        if waveConn then pcall(function() waveConn:Disconnect() end) end
+        waveObj, waveConn = o, nil
+        if o then
+            waveConn = o.Changed:Connect(function(v)
+                if alive() then pcall(MT.waveChanged, v) end
+            end)
+        end
+    end
+    hookWave(waveObj)
+    task.spawn(function()
+        while alive() do
+            task.wait(0.25)
+            local o = MD.obj("CurrentWave")
+            if o ~= waveObj then hookWave(o) end
+            local n = MD.wave()
+            if n > 0 and n ~= mc.wave then pcall(MT.waveChanged, n) end
+            pcall(TR.ensure)
+        end
+    end)
     if net then
         pcall(function()
             net.Fired("ShowMatchFinishStat"):Connect(function(map, _, coins, candy, _, _, won, mode)
