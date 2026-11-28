@@ -2025,7 +2025,7 @@ function TR.consider(m)
             end
             return
         end
-        if os.clock() - t0 > 5 then return end
+        if os.clock() - t0 > 30 then return end
         task.wait(mc.playing and 0.03 or 0.1)
     end
 end
@@ -2752,6 +2752,12 @@ function MX.place(s, myMatch)
                 end
                 return nm ~= nil
             end, 6, myMatch, 0.05)
+            if not nm and price > 0 and money() <= before - price * 0.8 then
+                waitUntil(function()
+                    nm, ne = TR.at(p, s.n, mc.claim)
+                    return nm ~= nil
+                end, 10, myMatch, 0.1)
+            end
         end
         if nm then
             NET.okJob = game.JobId
@@ -2797,7 +2803,7 @@ function MX.awayWait(m, myMatch)
     return waitUntil(function()
         local e = mc.reg[m]
         return not (e and e.away)
-    end, 30, myMatch, 0.1)
+    end, MX.STUCK_MAX, myMatch, 0.1)
 end
 function MX.upgrade(s, myMatch)
     local want = tonumber(s.lv)
@@ -2815,7 +2821,7 @@ function MX.upgrade(s, myMatch)
         local price = TW.upPrice(m.Name, level) or s.c or 0
         local ready = waitUntil(function()
             local m2 = MX.find(s)
-            if not m2 then return false end
+            if not m2 then return true end
             local l2 = TW.level(m2)
             if want and l2 >= want then return true end
             if MX.cash() < (TW.upPrice(m2.Name, l2) or price) * margin then return false end
@@ -2834,6 +2840,12 @@ function MX.upgrade(s, myMatch)
             local m3 = MX.find(s)
             return m3 ~= nil and TW.level(m3) > level
         end, 3, myMatch, 0.03)
+        if not up and price > 0 and money() <= before - price * 0.8 then
+            up = waitUntil(function()
+                local m3 = MX.find(s)
+                return m3 ~= nil and TW.level(m3) > level
+            end, 6, myMatch, 0.1)
+        end
         if up then
             MX.reserve(before, price)
             misses, moneyFails, stuckAt = 0, 0, nil
@@ -2869,6 +2881,7 @@ function MX.sell(s, myMatch)
     return false
 end
 function MX.target(s, myMatch)
+    if s.mode == nil then return false end
     local tries, stuckAt, clicks = 0, nil, 0
     while same(myMatch) do
         local m = MX.findWait(s, myMatch)
