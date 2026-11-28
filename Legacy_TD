@@ -1938,11 +1938,12 @@ function TR.live(e, m)
     if e == nil or e.gone ~= nil or m.Parent == nil then return false end
     local f = TW.folder()
     if f and m.Parent ~= f and not m:IsDescendantOf(workspace) then return false end
+    if e.away and os.clock() - (e.awayAt or 0) > 20 then return false end
     return true
 end
-function TR.purge()
+function TR.purge(all)
     for m, e in pairs(mc.reg) do
-        if not TR.live(e, m) and not e.away then mc.reg[m] = nil end
+        if not TR.live(e, m) or (all and e.away) then mc.reg[m] = nil end
     end
 end
 function TR.count()
@@ -1958,8 +1959,11 @@ function TR.at(pos, name, skip)
         if TR.live(e, m) and not (skip and skip[m]) and (not name or e.name == name) then
             e.pos = TW.pos(m) or e.pos
             local d = xzDist(e.pos, pos)
-            if d < 1.5 and math.abs(e.pos.Y - pos.Y) < 12 and (not bestD or d < bestD) then
-                best, bestD, bestE = m, d, e
+            if d < 1.5 and math.abs(e.pos.Y - pos.Y) < 12 then
+                local score = d + (e.away and 100 or 0)
+                if not bestD or score < bestD then
+                    best, bestD, bestE = m, score, e
+                end
             end
         end
     end
@@ -2008,7 +2012,7 @@ function TR.removed(m)
     task.delay(0.1, function()
         if mc.reg[m] ~= e or e.gone then return end
         if m.Parent ~= nil and m:IsDescendantOf(workspace) then
-            e.away = true
+            e.away, e.awayAt = true, os.clock()
             return
         end
         TR.gone(m)
@@ -2116,7 +2120,7 @@ function MT.newMatch()
     MT.clearStamps()
     mc.claim, mc.k2pos, mc.spend, mc.nextAt = {}, {}, nil, 0
     mc.finalSeen = false
-    pcall(TR.purge)
+    pcall(TR.purge, true)
     st.farmSoldMatch, st.waveStart, st.matchStart, st.matchMode = nil, nil, nil, nil
     st.skipKey, st.skipTries, st.skipSeen, st.skipHold, st.voteTries = nil, 0, false, nil, 0
     if MT.endReset then MT.endReset() end
@@ -2823,8 +2827,21 @@ end
 function MX.awayWait(m, myMatch)
     return waitUntil(function()
         local e = mc.reg[m]
-        return not (e and e.away)
+        return not (e and e.away and TR.live(e, m))
     end, MX.STUCK_MAX, myMatch, 0.1)
+end
+function MX.maxLv(s)
+    local pos = (s.k and mc.k2pos[s.k]) or a2v(s.p)
+    local top = 0
+    for m, e in pairs(mc.reg) do
+        if TR.live(e, m) and (not s.n or e.name == s.n) then
+            local p = TW.pos(m) or e.pos
+            if xzDist(p, pos) < 1.5 and math.abs(p.Y - pos.Y) < 12 then
+                top = math.max(top, TW.level(m))
+            end
+        end
+    end
+    return top
 end
 function MX.upgrade(s, myMatch)
     local want = tonumber(s.lv)
@@ -2833,9 +2850,10 @@ function MX.upgrade(s, myMatch)
     while same(myMatch) do
         local m = MX.findWait(s, myMatch)
         if not m then return false end
+        if want and MX.maxLv(s) >= want then return true end
         if not MX.awayWait(m, myMatch) then return false end
         local level = TW.level(m)
-        if want and level >= want then return true end
+        if want and math.max(level, MX.maxLv(s)) >= want then return true end
         local maxL = TW.maxLevel(s.n or m.Name)
         if maxL and level >= maxL then return true end
         local margin = 1 + 0.03 * math.min(moneyFails, 10)
@@ -2844,7 +2862,7 @@ function MX.upgrade(s, myMatch)
             local m2 = MX.find(s)
             if not m2 then return true end
             local l2 = TW.level(m2)
-            if want and l2 >= want then return true end
+            if want and math.max(l2, MX.maxLv(s)) >= want then return true end
             if MX.cash() < (TW.upPrice(m2.Name, l2) or price) * margin then return false end
             return os.clock() >= mc.nextAt
         end, math.huge, myMatch, 0.05)
@@ -2852,14 +2870,14 @@ function MX.upgrade(s, myMatch)
         m = MX.findWait(s, myMatch)
         if not m then return false end
         level = TW.level(m)
-        if want and level >= want then return true end
+        if want and math.max(level, MX.maxLv(s)) >= want then return true end
         price = TW.upPrice(m.Name, level) or price
         local before = money()
         FW.fire("UpgradeTroop", m)
         MX.touch(0.35)
         local up = waitUntil(function()
             local m3 = MX.find(s)
-            return m3 ~= nil and TW.level(m3) > level
+            return (m3 ~= nil and TW.level(m3) > level) or MX.maxLv(s) > level
         end, 3, myMatch, 0.03)
         if not up and price > 0 and money() <= before - price * 0.8 then
             up = waitUntil(function()
